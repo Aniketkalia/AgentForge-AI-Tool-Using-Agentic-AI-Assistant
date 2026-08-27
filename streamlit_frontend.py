@@ -1,7 +1,3 @@
-# ============================================================
-# streamlit_frontend.py
-# ============================================================
-
 import streamlit as st
 
 from langchain_core.messages import (
@@ -31,20 +27,13 @@ st.set_page_config(
 
 
 # ============================================================
-# HANDLE GMAIL CALLBACK FIRST
-# ============================================================
-#
-# Google returns:
-#
-# ?code=XXXXX&state=XXXXX
-#
-# We process this BEFORE rendering the normal application.
-#
+# HANDLE GMAIL CALLBACK
 # ============================================================
 
 if (
     "code" in st.query_params
-    or "error" in st.query_params
+    or
+    "error" in st.query_params
 ):
 
     callback_success = (
@@ -57,14 +46,12 @@ if (
 
 
 # ============================================================
-# AGENTFORGE GOOGLE LOGIN
+# AGENTFORGE LOGIN
 # ============================================================
 
 if not st.user.is_logged_in:
 
-    st.title(
-        "🤖 AgentForge"
-    )
+    st.title("🤖 AgentForge")
 
     st.subheader(
         "Tool-Using Agentic AI Assistant"
@@ -76,7 +63,7 @@ if not st.user.is_logged_in:
 
     if st.button(
         "🔐 Login with Google",
-        width="stretch",
+        use_container_width=True,
     ):
 
         st.login()
@@ -94,40 +81,20 @@ user_id = st.user.get("sub")
 
 
 # ============================================================
-# LOAD GMAIL STATUS FROM SQLITE
-# ============================================================
-#
-# DO NOT rely only on st.session_state.
-#
-# Streamlit session_state can disappear after refresh/new tab.
-#
-# Gmail token is loaded from SQLite instead.
-#
+# LOAD GMAIL FROM DATABASE
 # ============================================================
 
-try:
+gmail_connected = (
+    is_gmail_connected()
+)
 
-    gmail_email = (
-        get_connected_gmail_email()
-    )
-
-    gmail_connected = (
-        gmail_email is not None
-    )
-
-except Exception as e:
-
-    gmail_email = None
-
-    gmail_connected = False
-
-    st.warning(
-        f"Gmail storage check failed: {e}"
-    )
+gmail_email = (
+    get_connected_gmail_email()
+)
 
 
 # ============================================================
-# KEEP SESSION CACHE IN SYNC
+# SESSION CACHE
 # ============================================================
 
 st.session_state[
@@ -156,9 +123,7 @@ st.sidebar.success(
 # GMAIL SECTION
 # ============================================================
 
-st.sidebar.markdown(
-    "---"
-)
+st.sidebar.markdown("---")
 
 st.sidebar.subheader(
     "📧 Gmail"
@@ -181,13 +146,11 @@ if gmail_connected:
             gmail_email
         )
 
-    # --------------------------------------------------------
-    # Disconnect button
-    # --------------------------------------------------------
+    st.sidebar.markdown("")
 
     if st.sidebar.button(
         "🔌 Disconnect Gmail",
-        width="stretch",
+        use_container_width=True,
     ):
 
         disconnect_gmail()
@@ -205,53 +168,65 @@ else:
         "Gmail is not connected."
     )
 
+
     # --------------------------------------------------------
-    # Generate OAuth URL
-    #
-    # IMPORTANT:
-    #
-    # st.link_button opens a NEW TAB.
-    #
-    # Therefore gmail_auth.py stores:
-    #
-    # - OAuth state
-    # - user ID
-    # - email
-    # - PKCE code verifier
-    #
-    # in SQLite rather than session_state.
-    #
+    # START AUTHORIZATION
     # --------------------------------------------------------
 
-    try:
+    if (
+        "gmail_auth_url"
+        not in st.session_state
+    ):
 
-        auth_url = connect_gmail()
+        if st.sidebar.button(
+            "🔗 Connect My Gmail",
+            use_container_width=True,
+        ):
 
-    except Exception as e:
+            auth_url = connect_gmail()
 
-        auth_url = None
 
-        st.sidebar.error(
-            f"OAuth setup error: {e}"
+            if auth_url:
+
+                st.session_state[
+                    "gmail_auth_url"
+                ] = auth_url
+
+                st.rerun()
+
+            else:
+
+                st.sidebar.error(
+                    "Unable to create Gmail "
+                    "authorization URL."
+                )
+
+
+    # --------------------------------------------------------
+    # SHOW GOOGLE LINK
+    # --------------------------------------------------------
+
+    if (
+        "gmail_auth_url"
+        in st.session_state
+    ):
+
+        st.sidebar.success(
+            "OAuth is ready."
         )
 
-    if auth_url:
-
         st.sidebar.link_button(
-            "🔗 Connect My Gmail",
-            auth_url,
-            width="stretch",
-            type="primary",
+            "🔐 Continue to Google",
+            st.session_state[
+                "gmail_auth_url"
+            ],
+            use_container_width=True,
         )
 
         st.sidebar.caption(
-            "Google will open in a new browser tab."
-        )
-
-    else:
-
-        st.sidebar.error(
-            "Unable to create Gmail authorization URL."
+            "Google will open in this tab. "
+            "After authorization, you will "
+            "return automatically to AgentForge."
         )
 
 
@@ -259,22 +234,27 @@ else:
 # LOGOUT
 # ============================================================
 
-st.sidebar.markdown(
-    "---"
-)
+st.sidebar.markdown("---")
 
 if st.sidebar.button(
     "🚪 Logout",
-    width="stretch",
+    use_container_width=True,
 ):
 
-    # Do NOT delete Gmail token here.
-    #
-    # Gmail connection belongs to the Google user
-    # and is stored persistently in SQLite.
-    #
-    # If you want logout to also disconnect Gmail,
-    # use the Disconnect Gmail button above.
+    st.session_state.pop(
+        "gmail_auth_url",
+        None
+    )
+
+    st.session_state.pop(
+        "gmail_connected",
+        None
+    )
+
+    st.session_state.pop(
+        "gmail_email",
+        None
+    )
 
     st.logout()
 
@@ -338,7 +318,8 @@ st.caption(
 if gmail_connected:
 
     st.success(
-        f"📧 Gmail connected: {gmail_email}"
+        f"📧 Gmail connected: "
+        f"{gmail_email}"
     )
 
 else:
@@ -353,7 +334,10 @@ else:
 # CHAT HISTORY
 # ============================================================
 
-if "messages" not in st.session_state:
+if (
+    "messages"
+    not in st.session_state
+):
 
     st.session_state.messages = []
 
@@ -378,6 +362,7 @@ for message in (
             st.markdown(
                 message.content
             )
+
 
     elif isinstance(
         message,
@@ -408,17 +393,15 @@ prompt = st.chat_input(
 
 if prompt:
 
-    # --------------------------------------------------------
-    # USER MESSAGE
-    # --------------------------------------------------------
-
     human_message = HumanMessage(
         content=prompt
     )
 
+
     st.session_state.messages.append(
         human_message
     )
+
 
     with st.chat_message(
         "user"
@@ -429,9 +412,9 @@ if prompt:
         )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # RUN AGENT
-    # --------------------------------------------------------
+    # ========================================================
 
     try:
 
@@ -448,9 +431,9 @@ if prompt:
             )
 
 
-            # =================================================
+            # ------------------------------------------------
             # EXTRACT RESPONSE
-            # =================================================
+            # ------------------------------------------------
 
             if isinstance(
                 response,
@@ -464,11 +447,13 @@ if prompt:
                     )
                 )
 
+
                 if response_messages:
 
                     final_message = (
                         response_messages[-1]
                     )
+
 
                     if hasattr(
                         final_message,
@@ -498,9 +483,9 @@ if prompt:
                 )
 
 
-            # =================================================
-            # SHOW RESPONSE
-            # =================================================
+            # ------------------------------------------------
+            # DISPLAY
+            # ------------------------------------------------
 
             st.markdown(
                 answer
