@@ -1,13 +1,20 @@
 import uuid
-
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
 
-from backend import chatbot, retrieve
-import streamlit as st
+st.set_page_config(
+    page_title="AgentForge AI",
+    page_icon="🤖",
+    layout="wide"
+)
+
+# ============================================================
+# GOOGLE LOGIN
+# ============================================================
 
 if not st.user.is_logged_in:
-    st.title("🤖 AgentForge")
+
+    st.title("🤖 AgentForge AI")
     st.subheader("Tool-Using Agentic AI Assistant")
 
     st.write("Please login with your Google account to continue.")
@@ -17,11 +24,20 @@ if not st.user.is_logged_in:
 
     st.stop()
 
+# ============================================================
+# BACKEND — LOAD ONLY AFTER LOGIN
+# ============================================================
+
+from backend import chatbot, retrieve
+
+# ============================================================
+# LOGGED-IN USER
+# ============================================================
+
 st.sidebar.success(f"Logged in as {st.user.email}")
 
 if st.sidebar.button("Logout"):
     st.logout()
-
 # ============================================================
 # PAGE CONFIG
 # ============================================================
