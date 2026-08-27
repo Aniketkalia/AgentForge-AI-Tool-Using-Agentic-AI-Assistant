@@ -1,4 +1,5 @@
 import json
+import secrets
 import streamlit as st
 
 from google_auth_oauthlib.flow import Flow
@@ -16,7 +17,29 @@ GMAIL_SCOPES = [
 
 
 # ============================================================
-# CREATE GMAIL OAUTH FLOW
+# HELPERS
+# ============================================================
+
+def get_user_id():
+    """Return the current AgentForge Google user ID."""
+
+    if not st.user.is_logged_in:
+        return None
+
+    return st.user.get("sub")
+
+
+def get_user_email():
+    """Return the current AgentForge email."""
+
+    if not st.user.is_logged_in:
+        return None
+
+    return st.user.email
+
+
+# ============================================================
+# CREATE OAUTH FLOW
 # ============================================================
 
 def get_gmail_flow():
@@ -35,43 +58,49 @@ def get_gmail_flow():
         scopes=GMAIL_SCOPES
     )
 
-    # IMPORTANT:
-    # Gmail OAuth returns to the APP HOMEPAGE.
-    #
-    # Do NOT use:
-    # /oauth2callback
-    #
-    # /oauth2callback is used by Streamlit's own st.login().
-
-    flow.redirect_uri = st.secrets["gmail_oauth"]["redirect_uri"]
+    flow.redirect_uri = st.secrets[
+        "gmail_oauth"
+    ]["redirect_uri"]
 
     return flow
 
 
 # ============================================================
-# START GMAIL CONNECTION
+# START GMAIL OAUTH
 # ============================================================
 
 def connect_gmail():
 
-    # Make sure AgentForge user is logged in
-    if not st.user.is_logged_in:
+    user_id = get_user_id()
+
+    user_email = get_user_email()
+
+    if not user_id or not user_email:
+        st.error(
+            "Please login to AgentForge first."
+        )
         return None
 
     flow = get_gmail_flow()
 
-    authorization_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",
-        login_hint=st.user.email
+    authorization_url, state = (
+        flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+            login_hint=user_email
+        )
     )
 
-    # Save OAuth state
-    st.session_state["gmail_oauth_state"] = state
+    # --------------------------------------------------------
+    # IMPORTANT
+    #
+    # Put state in query parameters.
+    #
+    # This survives a Streamlit page refresh.
+    # --------------------------------------------------------
 
-    # Mark OAuth as running
-    st.session_state["gmail_oauth_in_progress"] = True
+    st.query_params["gmail_oauth_state"] = state
 
     return authorization_url
 
@@ -89,7 +118,7 @@ def handle_gmail_callback():
     error = params.get("error")
 
     # --------------------------------------------------------
-    # No OAuth response
+    # No OAuth callback
     # --------------------------------------------------------
 
     if not code and not error:
@@ -112,13 +141,13 @@ def handle_gmail_callback():
 
 
     # --------------------------------------------------------
-    # User must be logged into AgentForge
+    # AgentForge login required
     # --------------------------------------------------------
 
     if not st.user.is_logged_in:
 
         st.error(
-            "Please login to AgentForge before connecting Gmail."
+            "Please login to AgentForge first."
         )
 
         st.query_params.clear()
@@ -127,13 +156,31 @@ def handle_gmail_callback():
 
 
     # --------------------------------------------------------
-    # Check authorization code
+    # Current AgentForge user
+    # --------------------------------------------------------
+
+    user_id = get_user_id()
+    logged_in_email = get_user_email()
+
+    if not user_id:
+
+        st.error(
+            "Unable to identify AgentForge user."
+        )
+
+        st.query_params.clear()
+
+        return False
+
+
+    # --------------------------------------------------------
+    # Authorization code
     # --------------------------------------------------------
 
     if not code:
 
         st.error(
-            "Gmail authorization code was not received."
+            "Google did not return an authorization code."
         )
 
         st.query_params.clear()
@@ -141,19 +188,35 @@ def handle_gmail_callback():
         return False
 
 
-    # --------------------------------------------------------
-    # Check OAuth state
-    # --------------------------------------------------------
+    # ========================================================
+    # GET SAVED STATE
+    # ========================================================
 
-    saved_state = st.session_state.get(
+    saved_state = params.get(
         "gmail_oauth_state"
     )
+
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # Google callback contains:
+    #
+    # ?code=...
+    # &state=...
+    #
+    # We stored our state as:
+    #
+    # gmail_oauth_state
+    #
+    # So the callback state must match it.
+    # --------------------------------------------------------
 
     if not saved_state:
 
         st.error(
-            "Gmail OAuth session expired. "
-            "Please click 'Connect Gmail' again."
+            "Gmail OAuth state was lost. "
+            "Please click Connect Gmail again."
         )
 
         st.query_params.clear()
@@ -205,40 +268,20 @@ def handle_gmail_callback():
 
         profile = (
             service.users()
-            .getProfile(userId="me")
+            .getProfile(
+                userId="me"
+            )
             .execute()
         )
 
-        gmail_email = profile["emailAddress"]
-
-
-        # ====================================================
-        # CURRENT AGENTFORGE USER
-        # ====================================================
-
-        logged_in_email = st.user.email
-
-        user_id = st.user.get("sub")
-
-
-        if not user_id:
-
-            st.error(
-                "Unable to identify the logged-in Google user."
-            )
-
-            st.query_params.clear()
-
-            return False
+        gmail_email = profile[
+            "emailAddress"
+        ]
 
 
         # ====================================================
         # SECURITY CHECK
         # ====================================================
-        #
-        # Gmail account MUST match the account that logged
-        # into AgentForge.
-        #
 
         if (
             not logged_in_email
@@ -251,16 +294,19 @@ def handle_gmail_callback():
             )
 
             st.warning(
-                f"AgentForge account: {logged_in_email}"
+                f"AgentForge login: "
+                f"{logged_in_email}"
             )
 
             st.warning(
-                f"Gmail account: {gmail_email}"
+                f"Gmail account: "
+                f"{gmail_email}"
             )
 
             st.info(
-                "Please authorize Gmail using the same "
-                "Google account that you used to login."
+                "Authorize Gmail using the same "
+                "Google account used to login "
+                "to AgentForge."
             )
 
             st.query_params.clear()
@@ -269,46 +315,63 @@ def handle_gmail_callback():
 
 
         # ====================================================
-        # SAVE TOKEN FOR CURRENT USER
+        # TOKEN DATA
+        # ====================================================
+
+        token_data = json.loads(
+            credentials.to_json()
+        )
+
+
+        # ====================================================
+        # SAVE CURRENT USER TOKEN
+        #
+        # IMPORTANT:
+        #
+        # user_id is used as the key.
+        #
+        # Therefore:
+        #
+        # User A → User A token
+        # User B → User B token
+        #
         # ====================================================
 
         if "gmail_tokens" not in st.session_state:
 
-            st.session_state["gmail_tokens"] = {}
+            st.session_state[
+                "gmail_tokens"
+            ] = {}
 
 
-        st.session_state["gmail_tokens"][user_id] = (
-            json.loads(
-                credentials.to_json()
-            )
-        )
+        st.session_state[
+            "gmail_tokens"
+        ][user_id] = token_data
 
 
         # ====================================================
-        # SAVE CONNECTION INFO
+        # SAVE CONNECTION INFORMATION
         # ====================================================
 
-        st.session_state["gmail_connected"] = True
+        st.session_state[
+            "gmail_connected"
+        ] = True
 
-        st.session_state["gmail_email"] = gmail_email
-
-
-        # OAuth completed
-        st.session_state["gmail_oauth_in_progress"] = False
-
-        # Remove OAuth state
-        st.session_state.pop(
-            "gmail_oauth_state",
-            None
-        )
+        st.session_state[
+            "gmail_email"
+        ] = gmail_email
 
 
-        # Remove OAuth query parameters
+        # ====================================================
+        # CLEAR CALLBACK PARAMETERS
+        # ====================================================
+
         st.query_params.clear()
 
 
         st.success(
-            f"✅ Gmail connected successfully: {gmail_email}"
+            f"✅ Gmail connected: "
+            f"{gmail_email}"
         )
 
         return True
@@ -331,31 +394,28 @@ def handle_gmail_callback():
 
 def get_gmail_service():
 
-    # User must be logged in
-    if not st.user.is_logged_in:
-        return None
-
-
-    # Get CURRENT AgentForge user's Google ID
-    user_id = st.user.get("sub")
+    user_id = get_user_id()
 
     if not user_id:
         return None
 
 
-    # Get tokens
+    # --------------------------------------------------------
+    # Get token belonging ONLY to current user
+    # --------------------------------------------------------
+
     gmail_tokens = st.session_state.get(
         "gmail_tokens",
         {}
     )
 
-
-    # IMPORTANT:
-    # Only get token belonging to THIS user.
-    token_data = gmail_tokens.get(user_id)
+    token_data = gmail_tokens.get(
+        user_id
+    )
 
 
     if not token_data:
+
         return None
 
 
@@ -369,7 +429,6 @@ def get_gmail_service():
         )
 
 
-        # Build Gmail service
         service = build(
             "gmail",
             "v1",
