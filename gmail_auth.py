@@ -15,7 +15,10 @@ from googleapiclient.discovery import build
 # CONFIG
 # ============================================================
 
-DB_PATH = Path("gmail_tokens.db")
+# IMPORTANT:
+# New database name avoids the old broken database schema.
+DB_PATH = Path("gmail_tokens_v2.db")
+
 
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.send"
@@ -27,8 +30,9 @@ GMAIL_SCOPES = [
 # ============================================================
 
 def get_db_connection():
+
     conn = sqlite3.connect(
-        DB_PATH,
+        str(DB_PATH),
         check_same_thread=False
     )
 
@@ -48,7 +52,7 @@ def get_db_connection():
 
 
 # ============================================================
-# SAVE GMAIL TOKEN
+# SAVE TOKEN
 # ============================================================
 
 def save_gmail_token(
@@ -62,7 +66,11 @@ def save_gmail_token(
     conn.execute(
         """
         INSERT OR REPLACE INTO gmail_tokens
-        (user_id, email, token_json)
+        (
+            user_id,
+            email,
+            token_json
+        )
         VALUES (?, ?, ?)
         """,
         (
@@ -77,7 +85,7 @@ def save_gmail_token(
 
 
 # ============================================================
-# LOAD GMAIL TOKEN
+# LOAD TOKEN
 # ============================================================
 
 def load_gmail_token(user_id):
@@ -86,7 +94,9 @@ def load_gmail_token(user_id):
 
     cursor = conn.execute(
         """
-        SELECT email, token_json
+        SELECT
+            email,
+            token_json
         FROM gmail_tokens
         WHERE user_id = ?
         """,
@@ -97,10 +107,12 @@ def load_gmail_token(user_id):
 
     conn.close()
 
-    if not row:
+    if row is None:
+
         return None, None
 
-    email, token_json = row
+    email = row[0]
+    token_json = row[1]
 
     return email, token_json
 
@@ -126,18 +138,36 @@ def delete_gmail_token(user_id):
 
 
 # ============================================================
-# CREATE OAUTH FLOW
+# OAUTH FLOW
 # ============================================================
 
 def get_gmail_flow():
 
-    client_id = st.secrets["gmail_oauth"]["client_id"]
-    client_secret = st.secrets["gmail_oauth"]["client_secret"]
-    redirect_uri = st.secrets["gmail_oauth"]["redirect_uri"]
+    client_id = st.secrets[
+        "gmail_oauth"
+    ][
+        "client_id"
+    ]
+
+    client_secret = st.secrets[
+        "gmail_oauth"
+    ][
+        "client_secret"
+    ]
+
+    redirect_uri = st.secrets[
+        "gmail_oauth"
+    ][
+        "redirect_uri"
+    ]
+
 
     config = {
+
         "web": {
+
             "client_id": client_id,
+
             "client_secret": client_secret,
 
             "auth_uri":
@@ -148,23 +178,23 @@ def get_gmail_flow():
         }
     }
 
+
     # IMPORTANT:
     #
-    # Disable automatic PKCE.
+    # Disable PKCE because your callback creates
+    # a new Flow object.
     #
-    # Your previous code generated a code_challenge
-    # during authorization but then created a new Flow
-    # during callback without the original code_verifier.
-    #
-    # That caused:
+    # This fixes:
     #
     # invalid_grant: Missing code verifier
     #
+
     flow = Flow.from_client_config(
         config,
         scopes=GMAIL_SCOPES,
         autogenerate_code_verifier=False
     )
+
 
     flow.redirect_uri = redirect_uri
 
@@ -172,53 +202,80 @@ def get_gmail_flow():
 
 
 # ============================================================
-# START GMAIL OAUTH
+# START GMAIL AUTH
 # ============================================================
 
 def connect_gmail():
 
     if not st.user.is_logged_in:
+
         return None
+
 
     flow = get_gmail_flow()
 
-    authorization_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",
-        login_hint=st.user.email
+
+    authorization_url, state = (
+        flow.authorization_url(
+
+            access_type="offline",
+
+            include_granted_scopes="true",
+
+            prompt="consent",
+
+            login_hint=st.user.email
+        )
     )
 
-    # Store OAuth state
-    st.session_state["gmail_oauth_state"] = state
 
-    st.session_state["gmail_oauth_in_progress"] = True
+    # Save OAuth state
+    st.session_state[
+        "gmail_oauth_state"
+    ] = state
+
+
+    st.session_state[
+        "gmail_oauth_in_progress"
+    ] = True
+
 
     return authorization_url
 
 
 # ============================================================
-# HANDLE GOOGLE CALLBACK
+# CALLBACK
 # ============================================================
 
 def handle_gmail_callback():
 
     params = st.query_params
 
-    code = params.get("code")
-    state = params.get("state")
-    error = params.get("error")
+
+    code = params.get(
+        "code"
+    )
+
+    state = params.get(
+        "state"
+    )
+
+    error = params.get(
+        "error"
+    )
+
 
     # --------------------------------------------------------
-    # Nothing to process
+    # No callback
     # --------------------------------------------------------
 
     if not code and not error:
+
         return False
 
 
     # --------------------------------------------------------
-    # Google OAuth error
+    # Google error
     # --------------------------------------------------------
 
     if error:
@@ -233,7 +290,7 @@ def handle_gmail_callback():
 
 
     # --------------------------------------------------------
-    # AgentForge login required
+    # Login check
     # --------------------------------------------------------
 
     if not st.user.is_logged_in:
@@ -248,7 +305,7 @@ def handle_gmail_callback():
 
 
     # --------------------------------------------------------
-    # Authorization code
+    # Code check
     # --------------------------------------------------------
 
     if not code:
@@ -263,12 +320,13 @@ def handle_gmail_callback():
 
 
     # --------------------------------------------------------
-    # Validate OAuth state
+    # State check
     # --------------------------------------------------------
 
     saved_state = st.session_state.get(
         "gmail_oauth_state"
     )
+
 
     if not saved_state:
 
@@ -294,27 +352,27 @@ def handle_gmail_callback():
 
 
     # ========================================================
-    # EXCHANGE CODE
+    # TOKEN EXCHANGE
     # ========================================================
 
     try:
 
         flow = get_gmail_flow()
 
-        # IMPORTANT:
-        #
-        # Since PKCE is disabled, there is no
-        # missing code_verifier problem.
-        #
+
+        # PKCE disabled, so this will not require
+        # the missing code verifier.
+
         flow.fetch_token(
             code=code
         )
+
 
         credentials = flow.credentials
 
 
         # ====================================================
-        # BUILD GMAIL SERVICE
+        # GMAIL SERVICE
         # ====================================================
 
         service = build(
@@ -326,14 +384,17 @@ def handle_gmail_callback():
 
 
         # ====================================================
-        # GET GMAIL PROFILE
+        # GET GMAIL ACCOUNT
         # ====================================================
 
         profile = (
             service.users()
-            .getProfile(userId="me")
+            .getProfile(
+                userId="me"
+            )
             .execute()
         )
+
 
         gmail_email = profile.get(
             "emailAddress"
@@ -343,7 +404,7 @@ def handle_gmail_callback():
         if not gmail_email:
 
             raise Exception(
-                "Could not determine Gmail account."
+                "Unable to determine Gmail email address."
             )
 
 
@@ -352,7 +413,10 @@ def handle_gmail_callback():
         # ====================================================
 
         logged_in_email = st.user.email
-        user_id = st.user.get("sub")
+
+        user_id = st.user.get(
+            "sub"
+        )
 
 
         if not user_id:
@@ -363,14 +427,15 @@ def handle_gmail_callback():
 
 
         # ====================================================
-        # ACCOUNT SECURITY CHECK
+        # ACCOUNT MATCH
         # ====================================================
 
         if (
             not logged_in_email
             or
             gmail_email.lower()
-            != logged_in_email.lower()
+            !=
+            logged_in_email.lower()
         ):
 
             st.error(
@@ -378,16 +443,16 @@ def handle_gmail_callback():
             )
 
             st.warning(
-                f"AgentForge account: {logged_in_email}"
+                f"AgentForge: {logged_in_email}"
             )
 
             st.warning(
-                f"Gmail account: {gmail_email}"
+                f"Gmail: {gmail_email}"
             )
 
             st.info(
-                "Use the same Google account for "
-                "AgentForge and Gmail."
+                "Use the same Google account "
+                "for AgentForge and Gmail."
             )
 
             st.query_params.clear()
@@ -396,10 +461,11 @@ def handle_gmail_callback():
 
 
         # ====================================================
-        # SAVE TOKEN PERMANENTLY
+        # SAVE TOKEN
         # ====================================================
 
         token_json = credentials.to_json()
+
 
         save_gmail_token(
             user_id=user_id,
@@ -409,14 +475,22 @@ def handle_gmail_callback():
 
 
         # ====================================================
-        # UPDATE SESSION
+        # SESSION
         # ====================================================
 
-        st.session_state["gmail_connected"] = True
+        st.session_state[
+            "gmail_connected"
+        ] = True
 
-        st.session_state["gmail_email"] = gmail_email
 
-        st.session_state["gmail_oauth_in_progress"] = False
+        st.session_state[
+            "gmail_email"
+        ] = gmail_email
+
+
+        st.session_state[
+            "gmail_oauth_in_progress"
+        ] = False
 
 
         st.session_state.pop(
@@ -425,11 +499,9 @@ def handle_gmail_callback():
         )
 
 
-        # ====================================================
-        # REMOVE CALLBACK PARAMETERS
-        # ====================================================
-
+        # Remove OAuth parameters
         st.query_params.clear()
+
 
         return True
 
@@ -446,46 +518,67 @@ def handle_gmail_callback():
 
 
 # ============================================================
-# CHECK GMAIL CONNECTION
+# CHECK CONNECTION
 # ============================================================
 
 def is_gmail_connected():
 
     if not st.user.is_logged_in:
+
         return False
 
-    user_id = st.user.get("sub")
+
+    user_id = st.user.get(
+        "sub"
+    )
+
 
     if not user_id:
+
         return False
 
-    email, token_json = load_gmail_token(
-        user_id
+
+    email, token_json = (
+        load_gmail_token(
+            user_id
+        )
     )
+
 
     return (
         email is not None
-        and token_json is not None
+        and
+        token_json is not None
     )
 
 
 # ============================================================
-# GET CONNECTED GMAIL EMAIL
+# GET CONNECTED EMAIL
 # ============================================================
 
 def get_connected_gmail_email():
 
     if not st.user.is_logged_in:
+
         return None
 
-    user_id = st.user.get("sub")
+
+    user_id = st.user.get(
+        "sub"
+    )
+
 
     if not user_id:
+
         return None
 
-    email, token_json = load_gmail_token(
-        user_id
+
+    email, token_json = (
+        load_gmail_token(
+            user_id
+        )
     )
+
 
     return email
 
@@ -497,25 +590,38 @@ def get_connected_gmail_email():
 def get_gmail_service():
 
     if not st.user.is_logged_in:
+
         return None
 
-    user_id = st.user.get("sub")
 
-    if not user_id:
-        return None
-
-    email, token_json = load_gmail_token(
-        user_id
+    user_id = st.user.get(
+        "sub"
     )
 
-    if not token_json:
+
+    if not user_id:
+
         return None
+
+
+    email, token_json = (
+        load_gmail_token(
+            user_id
+        )
+    )
+
+
+    if not token_json:
+
+        return None
+
 
     try:
 
         token_data = json.loads(
             token_json
         )
+
 
         credentials = (
             Credentials.from_authorized_user_info(
@@ -525,11 +631,15 @@ def get_gmail_service():
         )
 
 
-        # ----------------------------------------------------
-        # Refresh expired access token automatically
-        # ----------------------------------------------------
+        # ====================================================
+        # REFRESH TOKEN
+        # ====================================================
 
-        if credentials.expired and credentials.refresh_token:
+        if (
+            credentials.expired
+            and
+            credentials.refresh_token
+        ):
 
             from google.auth.transport.requests import Request
 
@@ -537,7 +647,8 @@ def get_gmail_service():
                 Request()
             )
 
-            # Save refreshed token
+
+            # Save refreshed credentials
             save_gmail_token(
                 user_id=user_id,
                 email=email,
@@ -545,12 +656,17 @@ def get_gmail_service():
             )
 
 
+        # ====================================================
+        # BUILD SERVICE
+        # ====================================================
+
         service = build(
             "gmail",
             "v1",
             credentials=credentials,
             cache_discovery=False
         )
+
 
         return service
 
@@ -565,21 +681,27 @@ def get_gmail_service():
 
 
 # ============================================================
-# DISCONNECT GMAIL
+# DISCONNECT
 # ============================================================
 
 def disconnect_gmail():
 
     if not st.user.is_logged_in:
+
         return
 
-    user_id = st.user.get("sub")
+
+    user_id = st.user.get(
+        "sub"
+    )
+
 
     if user_id:
 
         delete_gmail_token(
             user_id
         )
+
 
     st.session_state.pop(
         "gmail_connected",
