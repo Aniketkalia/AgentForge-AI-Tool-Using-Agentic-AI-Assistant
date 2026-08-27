@@ -26,7 +26,7 @@ st.set_page_config(
 
 
 # ============================================================
-# AGENTFORGE GOOGLE LOGIN
+# GOOGLE LOGIN
 # ============================================================
 
 if not st.user.is_logged_in:
@@ -45,6 +45,7 @@ if not st.user.is_logged_in:
         "🔐 Login with Google",
         use_container_width=True,
     ):
+
         st.login()
 
     st.stop()
@@ -59,45 +60,45 @@ user_id = st.user.get("sub")
 
 
 # ============================================================
-# IMPORTANT:
-# LANGGRAPH THREAD ID
-#
-# Every logged-in user gets one stable conversation thread.
-#
-# Because this value comes from Google user's `sub`,
-# refreshing the browser will use the SAME thread.
+# LANGGRAPH THREAD
 # ============================================================
 
-thread_id = f"agentforge-{user_id}"
+thread_id = (
+    f"agentforge-{user_id}"
+)
 
-
-# ============================================================
-# LANGGRAPH CONFIG
-# ============================================================
 
 config = {
+
     "configurable": {
-        "thread_id": thread_id
+
+        "thread_id":
+            thread_id
     }
 }
 
 
 # ============================================================
-# GMAIL OAUTH CALLBACK
+# GMAIL CALLBACK
 # ============================================================
 
 if "code" in st.query_params:
 
     try:
 
-        success = handle_gmail_callback()
+        success = (
+            handle_gmail_callback()
+        )
 
         if success:
 
-            # Remove OAuth parameters from URL
+            # Remove OAuth query parameters
             st.query_params.clear()
 
-            # Refresh application
+            st.session_state[
+                "gmail_auth_url"
+            ] = None
+
             st.rerun()
 
     except Exception as e:
@@ -111,16 +112,19 @@ if "code" in st.query_params:
 
 
 # ============================================================
-# GET GMAIL STATUS
+# GMAIL STATUS
 # ============================================================
 
 gmail_email = None
 gmail_connected = False
 gmail_error = None
 
+
 try:
 
-    gmail_email = get_connected_gmail_email()
+    gmail_email = (
+        get_connected_gmail_email()
+    )
 
     gmail_connected = (
         gmail_email is not None
@@ -132,58 +136,64 @@ except Exception as e:
 
 
 # ============================================================
-# KEEP SESSION CACHE SYNCHRONIZED
+# SESSION CACHE
 # ============================================================
 
-st.session_state["gmail_connected"] = (
-    gmail_connected
-)
+st.session_state[
+    "gmail_connected"
+] = gmail_connected
 
-st.session_state["gmail_email"] = (
-    gmail_email
-)
+st.session_state[
+    "gmail_email"
+] = gmail_email
 
 
 # ============================================================
-# LOAD CHAT FROM LANGGRAPH CHECKPOINTER
-#
-# This is the important part for browser refresh.
+# LOAD LANGGRAPH HISTORY
 # ============================================================
 
-if "messages_loaded" not in st.session_state:
+if (
+    "messages_loaded"
+    not in st.session_state
+):
 
-    st.session_state["messages_loaded"] = True
+    st.session_state[
+        "messages_loaded"
+    ] = True
 
     try:
 
-        state = chatbot.get_state(config)
+        state = chatbot.get_state(
+            config
+        )
 
-        if state and state.values:
+        if (
+            state
+            and state.values
+        ):
 
             saved_messages = (
                 state.values.get(
                     "messages",
-                    []
+                    [],
                 )
             )
 
-            st.session_state["messages"] = (
-                saved_messages.copy()
-            )
+            st.session_state[
+                "messages"
+            ] = saved_messages.copy()
 
         else:
 
-            st.session_state["messages"] = []
+            st.session_state[
+                "messages"
+            ] = []
 
-    except Exception as e:
-
-        # If there is no previous checkpoint,
-        # simply start a new conversation.
-        st.session_state["messages"] = []
+    except Exception:
 
         st.session_state[
-            "checkpoint_error"
-        ] = str(e)
+            "messages"
+        ] = []
 
 
 # ============================================================
@@ -200,7 +210,7 @@ st.sidebar.success(
 
 
 # ============================================================
-# GMAIL SECTION
+# GMAIL
 # ============================================================
 
 st.sidebar.markdown("---")
@@ -216,21 +226,15 @@ if gmail_connected:
         "✅ Gmail Connected"
     )
 
-    if gmail_email:
-
-        st.sidebar.caption(
-            gmail_email
-        )
+    st.sidebar.caption(
+        gmail_email
+    )
 
 else:
 
     st.sidebar.info(
         "Gmail is not connected."
     )
-
-    # --------------------------------------------------------
-    # CONNECT GMAIL
-    # --------------------------------------------------------
 
     if st.sidebar.button(
         "🔗 Connect My Gmail",
@@ -243,10 +247,11 @@ else:
 
             if auth_url:
 
-                # Store URL in session
                 st.session_state[
                     "gmail_auth_url"
                 ] = auth_url
+
+                st.rerun()
 
             else:
 
@@ -262,18 +267,20 @@ else:
 
 
 # ============================================================
-# GMAIL AUTHORIZATION LINK
-#
-# Uses SAME TAB.
-# No popup.
-# No small Chrome window.
+# AUTHORIZATION LINK
 # ============================================================
 
-if "gmail_auth_url" in st.session_state:
-
-    auth_url = st.session_state[
+if (
+    st.session_state.get(
         "gmail_auth_url"
-    ]
+    )
+):
+
+    auth_url = (
+        st.session_state[
+            "gmail_auth_url"
+        ]
+    )
 
     st.sidebar.markdown(
         "### 🔐 Gmail Authorization"
@@ -281,21 +288,22 @@ if "gmail_auth_url" in st.session_state:
 
     st.sidebar.markdown(
         f"""
-        <a href="{auth_url}"
-           target="_self"
-           style="
-               display:block;
-               width:100%;
-               padding:0.6rem 1rem;
-               background:#FF4B4B;
-               color:white;
-               text-align:center;
-               text-decoration:none;
-               border-radius:0.5rem;
-               font-weight:600;
-               margin-bottom:0.5rem;
-           ">
-           Continue with Google
+        <a
+            href="{auth_url}"
+            target="_self"
+            style="
+                display:block;
+                width:100%;
+                padding:0.7rem;
+                background:#FF4B4B;
+                color:white;
+                text-align:center;
+                text-decoration:none;
+                border-radius:8px;
+                font-weight:600;
+            "
+        >
+            Continue with Google
         </a>
         """,
         unsafe_allow_html=True,
@@ -307,7 +315,7 @@ if "gmail_auth_url" in st.session_state:
 
 
 # ============================================================
-# GMAIL ERROR
+# STORAGE ERROR
 # ============================================================
 
 if gmail_error:
@@ -328,23 +336,19 @@ if st.sidebar.button(
     use_container_width=True,
 ):
 
-    # Clear frontend session values
-
-    keys_to_remove = [
+    for key in [
         "messages",
         "messages_loaded",
         "gmail_connected",
         "gmail_email",
         "gmail_auth_url",
         "gmail_oauth_state",
-        "checkpoint_error",
-    ]
-
-    for key in keys_to_remove:
+        "gmail_oauth_redirect_uri",
+    ]:
 
         st.session_state.pop(
             key,
-            None
+            None,
         )
 
     st.logout()
@@ -359,28 +363,28 @@ with st.sidebar.expander(
 ):
 
     st.write(
-        "AgentForge User ID:",
-        user_id
+        "User ID:",
+        user_id,
     )
 
     st.write(
-        "AgentForge Email:",
-        user_email
+        "User Email:",
+        user_email,
     )
 
     st.write(
-        "LangGraph Thread ID:",
-        thread_id
+        "Thread ID:",
+        thread_id,
     )
 
     st.write(
         "Gmail Connected:",
-        gmail_connected
+        gmail_connected,
     )
 
     st.write(
         "Gmail Email:",
-        gmail_email
+        gmail_email,
     )
 
 
@@ -416,36 +420,6 @@ else:
 
 
 # ============================================================
-# CHECKPOINT ERROR
-# ============================================================
-
-if "checkpoint_error" in st.session_state:
-
-    # Do not show an error if it is simply
-    # because there is no previous checkpoint.
-
-    checkpoint_error = (
-        st.session_state[
-            "checkpoint_error"
-        ]
-    )
-
-    if (
-        "No checkpoint found"
-        not in checkpoint_error
-    ):
-
-        # Keep this hidden from normal users.
-        # Uncomment while debugging.
-
-        # st.info(
-        #     f"Checkpoint info: {checkpoint_error}"
-        # )
-
-        pass
-
-
-# ============================================================
 # CHAT HISTORY
 # ============================================================
 
@@ -455,10 +429,6 @@ messages = st.session_state.get(
 )
 
 
-# ============================================================
-# DISPLAY CHAT HISTORY
-# ============================================================
-
 for message in messages:
 
     if isinstance(
@@ -466,7 +436,9 @@ for message in messages:
         HumanMessage,
     ):
 
-        with st.chat_message("user"):
+        with st.chat_message(
+            "user"
+        ):
 
             st.markdown(
                 message.content
@@ -477,19 +449,14 @@ for message in messages:
         AIMessage,
     ):
 
-        # Ignore tool-call-only messages
-        # that may not have normal text.
-
-        content = message.content
-
-        if content:
+        if message.content:
 
             with st.chat_message(
                 "assistant"
             ):
 
                 st.markdown(
-                    content
+                    message.content
                 )
 
 
@@ -503,31 +470,24 @@ prompt = st.chat_input(
 
 
 # ============================================================
-# PROCESS USER MESSAGE
+# PROCESS MESSAGE
 # ============================================================
 
 if prompt:
 
-    # ========================================================
-    # USER MESSAGE
-    # ========================================================
-
-    human_message = HumanMessage(
-        content=prompt
+    human_message = (
+        HumanMessage(
+            content=prompt
+        )
     )
 
-    # Show immediately
-
-    with st.chat_message("user"):
+    with st.chat_message(
+        "user"
+    ):
 
         st.markdown(
             prompt
         )
-
-
-    # ========================================================
-    # RUN LANGGRAPH AGENT
-    # ========================================================
 
     try:
 
@@ -539,22 +499,18 @@ if prompt:
                 "Agent is thinking..."
             ):
 
-                response = chatbot.invoke(
-                    {
-                        "messages": [
-                            human_message
-                        ]
-                    },
-                    config=config,
+                response = (
+                    chatbot.invoke(
+                        {
+                            "messages": [
+                                human_message
+                            ]
+                        },
+                        config=config,
+                    )
                 )
 
-
-            # =================================================
-            # EXTRACT RESPONSE
-            # =================================================
-
             answer = None
-
 
             if isinstance(
                 response,
@@ -564,36 +520,28 @@ if prompt:
                 response_messages = (
                     response.get(
                         "messages",
-                        []
+                        [],
                     )
                 )
 
-                if response_messages:
+                for msg in reversed(
+                    response_messages
+                ):
 
-                    # Find the last AI message
-                    # containing actual content.
-
-                    for msg in reversed(
-                        response_messages
+                    if isinstance(
+                        msg,
+                        AIMessage,
                     ):
 
-                        if isinstance(
-                            msg,
-                            AIMessage,
-                        ):
+                        if msg.content:
 
-                            if msg.content:
+                            answer = (
+                                msg.content
+                            )
 
-                                answer = (
-                                    msg.content
-                                )
-
-                                break
-
+                            break
 
                 if answer is None:
-
-                    # Fallback
 
                     if response_messages:
 
@@ -616,50 +564,25 @@ if prompt:
                                 last_message
                             )
 
-                    else:
-
-                        answer = str(
-                            response
-                        )
-
             else:
 
                 answer = str(
                     response
                 )
 
-
-            # =================================================
-            # SHOW ANSWER
-            # =================================================
-
-            if answer:
-
-                st.markdown(
-                    answer
-                )
-
-            else:
+            if not answer:
 
                 answer = (
                     "I couldn't generate a response."
                 )
 
-                st.markdown(
-                    answer
-                )
+            st.markdown(
+                answer
+            )
 
-
-        # ====================================================
-        # IMPORTANT:
-        #
-        # DO NOT manually append the response here.
-        #
-        # LangGraph checkpointer already saved
-        # the conversation.
-        #
-        # Reload state from checkpoint.
-        # ====================================================
+        # ----------------------------------------------------
+        # Reload saved state
+        # ----------------------------------------------------
 
         try:
 
@@ -677,17 +600,17 @@ if prompt:
                 saved_messages = (
                     latest_state.values.get(
                         "messages",
-                        []
+                        [],
                     )
                 )
 
                 st.session_state[
                     "messages"
-                ] = saved_messages.copy()
+                ] = (
+                    saved_messages.copy()
+                )
 
             else:
-
-                # Fallback only
 
                 st.session_state[
                     "messages"
@@ -705,8 +628,6 @@ if prompt:
 
         except Exception:
 
-            # Fallback if state retrieval fails
-
             st.session_state[
                 "messages"
             ].append(
@@ -720,11 +641,6 @@ if prompt:
                     content=answer
                 )
             )
-
-
-    # ========================================================
-    # ERROR
-    # ========================================================
 
     except Exception as e:
 
