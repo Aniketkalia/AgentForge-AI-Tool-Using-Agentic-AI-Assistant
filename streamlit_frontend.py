@@ -1,3 +1,5 @@
+# streamlit_frontend.py
+
 import streamlit as st
 
 from langchain_core.messages import (
@@ -9,6 +11,7 @@ from gmail_auth import (
     connect_gmail,
     handle_gmail_callback,
     get_connected_gmail_email,
+    disconnect_gmail,
 )
 
 from backend import chatbot
@@ -19,19 +22,24 @@ from backend import chatbot
 # ============================================================
 
 st.set_page_config(
+
     page_title="AgentForge AI",
+
     page_icon="🤖",
+
     layout="wide",
 )
 
 
 # ============================================================
-# GOOGLE LOGIN
+# AGENTFORGE LOGIN
 # ============================================================
 
 if not st.user.is_logged_in:
 
-    st.title("🤖 AgentForge")
+    st.title(
+        "🤖 AgentForge"
+    )
 
     st.subheader(
         "Tool-Using Agentic AI Assistant"
@@ -56,7 +64,10 @@ if not st.user.is_logged_in:
 # ============================================================
 
 user_email = st.user.email
-user_id = st.user.get("sub")
+
+user_id = st.user.get(
+    "sub"
+)
 
 
 # ============================================================
@@ -92,12 +103,14 @@ if "code" in st.query_params:
 
         if success:
 
-            # Remove OAuth query parameters
-            st.query_params.clear()
+            st.session_state.pop(
+                "gmail_auth_url",
+                None
+            )
 
             st.session_state[
-                "gmail_auth_url"
-            ] = None
+                "gmail_connected"
+            ] = True
 
             st.rerun()
 
@@ -107,7 +120,6 @@ if "code" in st.query_params:
             f"❌ Gmail connection failed: {e}"
         )
 
-        # Remove bad OAuth parameters
         st.query_params.clear()
 
 
@@ -116,9 +128,8 @@ if "code" in st.query_params:
 # ============================================================
 
 gmail_email = None
-gmail_connected = False
-gmail_error = None
 
+gmail_connected = False
 
 try:
 
@@ -130,18 +141,15 @@ try:
         gmail_email is not None
     )
 
-except Exception as e:
+except Exception:
 
-    gmail_error = str(e)
+    gmail_connected = False
 
-
-# ============================================================
-# SESSION CACHE
-# ============================================================
 
 st.session_state[
     "gmail_connected"
 ] = gmail_connected
+
 
 st.session_state[
     "gmail_email"
@@ -149,13 +157,10 @@ st.session_state[
 
 
 # ============================================================
-# LOAD LANGGRAPH HISTORY
+# LOAD CHAT HISTORY
 # ============================================================
 
-if (
-    "messages_loaded"
-    not in st.session_state
-):
+if "messages_loaded" not in st.session_state:
 
     st.session_state[
         "messages_loaded"
@@ -163,19 +168,18 @@ if (
 
     try:
 
-        state = chatbot.get_state(
-            config
+        state = (
+            chatbot.get_state(
+                config
+            )
         )
 
-        if (
-            state
-            and state.values
-        ):
+        if state and state.values:
 
             saved_messages = (
                 state.values.get(
                     "messages",
-                    [],
+                    []
                 )
             )
 
@@ -204,6 +208,7 @@ st.sidebar.title(
     "🤖 AgentForge"
 )
 
+
 st.sidebar.success(
     f"👤 {user_email}"
 )
@@ -213,7 +218,9 @@ st.sidebar.success(
 # GMAIL
 # ============================================================
 
-st.sidebar.markdown("---")
+st.sidebar.markdown(
+    "---"
+)
 
 st.sidebar.subheader(
     "📧 Gmail"
@@ -230,11 +237,29 @@ if gmail_connected:
         gmail_email
     )
 
+    if st.sidebar.button(
+        "🔌 Disconnect Gmail",
+        use_container_width=True,
+    ):
+
+        disconnect_gmail()
+
+        st.session_state.pop(
+            "gmail_auth_url",
+            None
+        )
+
+        st.rerun()
+
 else:
 
     st.sidebar.info(
         "Gmail is not connected."
     )
+
+    # --------------------------------------------------------
+    # CONNECT BUTTON
+    # --------------------------------------------------------
 
     if st.sidebar.button(
         "🔗 Connect My Gmail",
@@ -243,15 +268,15 @@ else:
 
         try:
 
-            auth_url = connect_gmail()
+            auth_url = (
+                connect_gmail()
+            )
 
             if auth_url:
 
                 st.session_state[
                     "gmail_auth_url"
                 ] = auth_url
-
-                st.rerun()
 
             else:
 
@@ -262,18 +287,22 @@ else:
         except Exception as e:
 
             st.sidebar.error(
-                f"Gmail authorization error: {e}"
+                f"Gmail OAuth error: {e}"
             )
 
 
 # ============================================================
 # AUTHORIZATION LINK
+#
+# SAME TAB
+# NO POPUP
 # ============================================================
 
 if (
-    st.session_state.get(
-        "gmail_auth_url"
-    )
+    not gmail_connected
+    and
+    "gmail_auth_url"
+    in st.session_state
 ):
 
     auth_url = (
@@ -294,13 +323,14 @@ if (
             style="
                 display:block;
                 width:100%;
-                padding:0.7rem;
+                padding:0.7rem 1rem;
                 background:#FF4B4B;
                 color:white;
                 text-align:center;
                 text-decoration:none;
-                border-radius:8px;
+                border-radius:0.5rem;
                 font-weight:600;
+                margin-bottom:0.5rem;
             "
         >
             Continue with Google
@@ -315,40 +345,43 @@ if (
 
 
 # ============================================================
-# STORAGE ERROR
-# ============================================================
-
-if gmail_error:
-
-    st.sidebar.warning(
-        f"Gmail storage check failed: {gmail_error}"
-    )
-
-
-# ============================================================
 # LOGOUT
 # ============================================================
 
-st.sidebar.markdown("---")
+st.sidebar.markdown(
+    "---"
+)
+
 
 if st.sidebar.button(
     "🚪 Logout",
     use_container_width=True,
 ):
 
+    try:
+
+        disconnect_gmail()
+
+    except Exception:
+        pass
+
     for key in [
+
         "messages",
+
         "messages_loaded",
+
         "gmail_connected",
+
         "gmail_email",
+
         "gmail_auth_url",
-        "gmail_oauth_state",
-        "gmail_oauth_redirect_uri",
+
     ]:
 
         st.session_state.pop(
             key,
-            None,
+            None
         )
 
     st.logout()
@@ -363,38 +396,39 @@ with st.sidebar.expander(
 ):
 
     st.write(
-        "User ID:",
-        user_id,
+        "AgentForge Email:",
+        user_email
     )
 
     st.write(
-        "User Email:",
-        user_email,
+        "AgentForge User ID:",
+        user_id
     )
 
     st.write(
         "Thread ID:",
-        thread_id,
+        thread_id
     )
 
     st.write(
         "Gmail Connected:",
-        gmail_connected,
+        gmail_connected
     )
 
     st.write(
         "Gmail Email:",
-        gmail_email,
+        gmail_email
     )
 
 
 # ============================================================
-# MAIN PAGE
+# MAIN
 # ============================================================
 
 st.title(
     "🤖 AgentForge AI"
 )
+
 
 st.caption(
     f"Logged in as: {user_email}"
@@ -433,7 +467,7 @@ for message in messages:
 
     if isinstance(
         message,
-        HumanMessage,
+        HumanMessage
     ):
 
         with st.chat_message(
@@ -446,17 +480,19 @@ for message in messages:
 
     elif isinstance(
         message,
-        AIMessage,
+        AIMessage
     ):
 
-        if message.content:
+        content = message.content
+
+        if content:
 
             with st.chat_message(
                 "assistant"
             ):
 
                 st.markdown(
-                    message.content
+                    content
                 )
 
 
@@ -475,11 +511,13 @@ prompt = st.chat_input(
 
 if prompt:
 
-    human_message = (
-        HumanMessage(
-            content=prompt
-        )
+    human_message = HumanMessage(
+        content=prompt
     )
+
+    # --------------------------------------------------------
+    # DISPLAY USER MESSAGE
+    # --------------------------------------------------------
 
     with st.chat_message(
         "user"
@@ -488,6 +526,10 @@ if prompt:
         st.markdown(
             prompt
         )
+
+    # --------------------------------------------------------
+    # RUN AGENT
+    # --------------------------------------------------------
 
     try:
 
@@ -499,81 +541,61 @@ if prompt:
                 "Agent is thinking..."
             ):
 
-                response = (
-                    chatbot.invoke(
-                        {
-                            "messages": [
-                                human_message
-                            ]
-                        },
-                        config=config,
-                    )
+                response = chatbot.invoke(
+
+                    {
+                        "messages": [
+                            human_message
+                        ]
+                    },
+
+                    config=config,
                 )
+
+            # ------------------------------------------------
+            # FIND FINAL AI RESPONSE
+            # ------------------------------------------------
 
             answer = None
 
-            if isinstance(
-                response,
-                dict,
+            response_messages = (
+                response.get(
+                    "messages",
+                    []
+                )
+                if isinstance(
+                    response,
+                    dict
+                )
+                else []
+            )
+
+            for msg in reversed(
+                response_messages
             ):
 
-                response_messages = (
-                    response.get(
-                        "messages",
-                        [],
-                    )
-                )
-
-                for msg in reversed(
-                    response_messages
+                if isinstance(
+                    msg,
+                    AIMessage
                 ):
 
-                    if isinstance(
-                        msg,
-                        AIMessage,
-                    ):
+                    if msg.content:
 
-                        if msg.content:
-
-                            answer = (
-                                msg.content
-                            )
-
-                            break
-
-                if answer is None:
-
-                    if response_messages:
-
-                        last_message = (
-                            response_messages[-1]
+                        answer = (
+                            msg.content
                         )
 
-                        if hasattr(
-                            last_message,
-                            "content",
-                        ):
+                        break
 
-                            answer = (
-                                last_message.content
-                            )
-
-                        else:
-
-                            answer = str(
-                                last_message
-                            )
-
-            else:
-
-                answer = str(
-                    response
-                )
+            # ------------------------------------------------
+            # FALLBACK
+            # ------------------------------------------------
 
             if not answer:
 
                 answer = (
-                    "I couldn't generate a response."
+                    "I couldn't generate "
+                    "a response."
                 )
 
             st.markdown(
@@ -581,7 +603,7 @@ if prompt:
             )
 
         # ----------------------------------------------------
-        # Reload saved state
+        # REFRESH CHAT FROM CHECKPOINT
         # ----------------------------------------------------
 
         try:
@@ -594,13 +616,14 @@ if prompt:
 
             if (
                 latest_state
-                and latest_state.values
+                and
+                latest_state.values
             ):
 
                 saved_messages = (
                     latest_state.values.get(
                         "messages",
-                        [],
+                        []
                     )
                 )
 
