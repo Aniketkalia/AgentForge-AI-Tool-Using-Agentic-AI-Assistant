@@ -1,3 +1,5 @@
+# streamlit_frontend.py
+
 import streamlit as st
 
 from langchain_core.messages import (
@@ -27,7 +29,7 @@ st.set_page_config(
 
 
 # ============================================================
-# HANDLE GMAIL CALLBACK FIRST
+# HANDLE GMAIL CALLBACK
 # ============================================================
 
 if "code" in st.query_params:
@@ -36,12 +38,8 @@ if "code" in st.query_params:
 
     if success:
 
-        st.success(
-            "✅ Gmail connected successfully!"
-        )
+        st.session_state["gmail_connected"] = True
 
-        # Small delay is unnecessary.
-        # Rerun after callback has been processed.
         st.rerun()
 
 
@@ -72,7 +70,7 @@ if not st.user.is_logged_in:
 
 
 # ============================================================
-# USER
+# CURRENT USER
 # ============================================================
 
 user_email = st.user.email
@@ -80,12 +78,25 @@ user_id = st.user.get("sub")
 
 
 # ============================================================
-# GET PERSISTENT GMAIL STATUS
+# GMAIL STATUS
 # ============================================================
 
-gmail_connected = is_gmail_connected()
-
 gmail_email = get_connected_gmail_email()
+
+gmail_connected = (
+    gmail_email is not None
+)
+
+
+# Keep session synchronized
+
+st.session_state["gmail_connected"] = (
+    gmail_connected
+)
+
+st.session_state["gmail_email"] = (
+    gmail_email
+)
 
 
 # ============================================================
@@ -122,8 +133,10 @@ if gmail_connected:
         gmail_email
     )
 
+    st.sidebar.markdown("---")
+
     if st.sidebar.button(
-        "Disconnect Gmail",
+        "🔌 Disconnect Gmail",
         use_container_width=True,
     ):
 
@@ -138,8 +151,9 @@ else:
         "Gmail is not connected."
     )
 
+
     # --------------------------------------------------------
-    # CREATE OAUTH URL
+    # Generate Google OAuth URL
     # --------------------------------------------------------
 
     try:
@@ -156,34 +170,19 @@ else:
 
 
     # --------------------------------------------------------
-    # NORMAL HTML LINK
+    # NORMAL GOOGLE LINK
     # --------------------------------------------------------
 
     if auth_url:
 
-        st.sidebar.markdown(
-            f"""
-            <a href="{auth_url}"
-               target="_blank"
-               style="
-                    display:block;
-                    width:100%;
-                    padding:10px;
-                    background:#ff4b4b;
-                    color:white;
-                    text-align:center;
-                    text-decoration:none;
-                    border-radius:8px;
-                    font-weight:600;
-               ">
-               🔗 Connect My Gmail
-            </a>
-            """,
-            unsafe_allow_html=True,
+        st.sidebar.link_button(
+            "🔗 Connect My Gmail",
+            auth_url,
+            use_container_width=True,
         )
 
         st.sidebar.caption(
-            "Google will open in a new tab."
+            "Google authorization will open in this tab."
         )
 
     else:
@@ -204,6 +203,21 @@ if st.sidebar.button(
     use_container_width=True,
 ):
 
+    st.session_state.pop(
+        "gmail_connected",
+        None
+    )
+
+    st.session_state.pop(
+        "gmail_email",
+        None
+    )
+
+    st.session_state.pop(
+        "gmail_oauth_state",
+        None
+    )
+
     st.logout()
 
 
@@ -217,22 +231,22 @@ with st.sidebar.expander(
 
     st.write(
         "AgentForge User ID:",
-        user_id,
+        user_id
     )
 
     st.write(
         "AgentForge Email:",
-        user_email,
+        user_email
     )
 
     st.write(
         "Gmail Connected:",
-        gmail_connected,
+        gmail_connected
     )
 
     st.write(
         "Gmail Email:",
-        gmail_email,
+        gmail_email
     )
 
 
@@ -286,15 +300,11 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-# ============================================================
-# DISPLAY HISTORY
-# ============================================================
-
 for message in st.session_state.messages:
 
     if isinstance(
         message,
-        HumanMessage,
+        HumanMessage
     ):
 
         with st.chat_message("user"):
@@ -303,9 +313,10 @@ for message in st.session_state.messages:
                 message.content
             )
 
+
     elif isinstance(
         message,
-        AIMessage,
+        AIMessage
     ):
 
         with st.chat_message("assistant"):
@@ -316,13 +327,17 @@ for message in st.session_state.messages:
 
 
 # ============================================================
-# CHAT
+# CHAT INPUT
 # ============================================================
 
 prompt = st.chat_input(
     "Ask me anything..."
 )
 
+
+# ============================================================
+# PROCESS MESSAGE
+# ============================================================
 
 if prompt:
 
@@ -334,6 +349,7 @@ if prompt:
         human_message
     )
 
+
     with st.chat_message("user"):
 
         st.markdown(
@@ -342,7 +358,7 @@ if prompt:
 
 
     # ========================================================
-    # AGENT
+    # RUN AGENT
     # ========================================================
 
     try:
@@ -358,19 +374,19 @@ if prompt:
             )
 
 
-            # ------------------------------------------------
-            # EXTRACT ANSWER
-            # ------------------------------------------------
+            # =================================================
+            # EXTRACT RESPONSE
+            # =================================================
 
             if isinstance(
                 response,
-                dict,
+                dict
             ):
 
                 response_messages = (
                     response.get(
                         "messages",
-                        [],
+                        []
                     )
                 )
 
@@ -382,7 +398,7 @@ if prompt:
 
                     if hasattr(
                         final_message,
-                        "content",
+                        "content"
                     ):
 
                         answer = (
@@ -413,9 +429,9 @@ if prompt:
             )
 
 
-        # ----------------------------------------------------
-        # SAVE ANSWER
-        # ----------------------------------------------------
+        # ====================================================
+        # SAVE RESPONSE
+        # ====================================================
 
         st.session_state.messages.append(
             AIMessage(
