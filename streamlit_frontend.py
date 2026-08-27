@@ -1,9 +1,14 @@
-import uuid
 import streamlit as st
 
 from langchain_core.messages import (
     HumanMessage,
-    AIMessage
+    AIMessage,
+)
+
+from gmail_auth import (
+    connect_gmail,
+    handle_gmail_callback,
+    get_gmail_service,
 )
 
 
@@ -15,12 +20,32 @@ st.set_page_config(
     page_title="AgentForge AI",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded"
 )
 
 
 # ============================================================
-# GOOGLE LOGIN
+# HANDLE GMAIL OAUTH CALLBACK
+# ============================================================
+#
+# Gmail OAuth returns to:
+#
+# https://your-app.streamlit.app/?code=...&state=...
+#
+# IMPORTANT:
+# /oauth2callback is ONLY for Streamlit's st.login()
+# Gmail connection uses the homepage URL.
+# ============================================================
+
+if "code" in st.query_params:
+
+    callback_success = handle_gmail_callback()
+
+    if callback_success:
+        st.rerun()
+
+
+# ============================================================
+# AGENTFORGE GOOGLE LOGIN
 # ============================================================
 
 if not st.user.is_logged_in:
@@ -32,12 +57,12 @@ if not st.user.is_logged_in:
     )
 
     st.write(
-        "Login with Google to use AgentForge."
+        "Login with Google to continue."
     )
 
     if st.button(
         "🔐 Login with Google",
-        type="primary"
+        use_container_width=True,
     ):
         st.login()
 
@@ -48,130 +73,177 @@ if not st.user.is_logged_in:
 # CURRENT LOGGED-IN USER
 # ============================================================
 
-current_user = st.user.email
+user_email = st.user.email
 user_id = st.user.get("sub")
 
-if not user_id:
-
-    st.error(
-        "Unable to identify the logged-in Google user."
-    )
-
-    st.stop()
-
 
 # ============================================================
-# GMAIL OAUTH
+# SIDEBAR
 # ============================================================
 
-from gmail_auth import (
-    connect_gmail,
-    handle_gmail_callback,
-    get_current_gmail_service
+st.sidebar.title("🤖 AgentForge")
+
+st.sidebar.success(
+    f"👤 {user_email}"
 )
 
 
 # ============================================================
-# INITIALIZE USER-SPECIFIC GMAIL STATE
+# GMAIL SECTION
 # ============================================================
 
-if "gmail_tokens" not in st.session_state:
+st.sidebar.markdown("---")
 
-    st.session_state["gmail_tokens"] = {}
+st.sidebar.subheader(
+    "📧 Gmail"
+)
 
 
-if "gmail_emails" not in st.session_state:
+# Get Gmail status
+gmail_connected = st.session_state.get(
+    "gmail_connected",
+    False,
+)
 
-    st.session_state["gmail_emails"] = {}
+gmail_email = st.session_state.get(
+    "gmail_email",
+    None,
+)
 
 
 # ============================================================
-# HANDLE GMAIL CALLBACK
-# ============================================================
-#
-# Gmail OAuth should redirect to:
-#
-# https://YOUR-APP.streamlit.app/
-#
-# with:
-#
-# ?code=...
-# &state=...
-#
-# This is NOT the Streamlit login callback.
-#
-# Streamlit login uses:
-#
-# /oauth2callback
-#
+# GMAIL CONNECTED
 # ============================================================
 
-if (
-    st.session_state.get(
-        "gmail_oauth_in_progress",
-        False
+if gmail_connected:
+
+    st.sidebar.success(
+        "✅ Gmail Connected"
     )
-    and "code" in st.query_params
+
+    if gmail_email:
+        st.sidebar.caption(
+            gmail_email
+        )
+
+
+# ============================================================
+# GMAIL NOT CONNECTED
+# ============================================================
+
+else:
+
+    st.sidebar.info(
+        "Gmail is not connected."
+    )
+
+    if st.sidebar.button(
+        "🔗 Connect My Gmail",
+        use_container_width=True,
+    ):
+
+        try:
+
+            auth_url = connect_gmail()
+
+            if auth_url:
+
+                # ------------------------------------------------
+                # Open Google OAuth in a NEW browser tab
+                # ------------------------------------------------
+
+                st.components.v1.html(
+                    f"""
+                    <script>
+                        window.open(
+                            {auth_url!r},
+                            "_blank"
+                        );
+                    </script>
+                    """,
+                    height=0,
+                )
+
+                st.sidebar.success(
+                    "Google authorization opened in a new tab."
+                )
+
+                st.info(
+                    "Complete Gmail authorization in the "
+                    "new tab. After authorization, return "
+                    "to this AgentForge tab."
+                )
+
+            else:
+
+                st.error(
+                    "Unable to start Gmail authorization."
+                )
+
+        except Exception as e:
+
+            st.error(
+                f"Gmail authorization error: {e}"
+            )
+
+
+# ============================================================
+# LOGOUT
+# ============================================================
+
+st.sidebar.markdown("---")
+
+if st.sidebar.button(
+    "🚪 Logout",
+    use_container_width=True,
 ):
 
-    gmail_success = handle_gmail_callback()
+    # Clear Gmail information from this session
+    st.session_state.pop(
+        "gmail_connected",
+        None,
+    )
 
-    # OAuth callback has completed.
-    st.session_state[
-        "gmail_oauth_in_progress"
-    ] = False
+    st.session_state.pop(
+        "gmail_email",
+        None,
+    )
 
-    if gmail_success:
+    st.session_state.pop(
+        "gmail_oauth_state",
+        None,
+    )
 
-        st.session_state[
-            "gmail_connected"
-        ] = True
-
-        st.rerun()
-
-    st.stop()
+    st.logout()
 
 
 # ============================================================
-# CURRENT USER GMAIL STATUS
+# DEBUG INFORMATION
 # ============================================================
 
-gmail_tokens = st.session_state.get(
-    "gmail_tokens",
-    {}
-)
+with st.sidebar.expander(
+    "🔧 Debug"
+):
 
+    st.write(
+        "AgentForge User ID:",
+        user_id,
+    )
 
-gmail_emails = st.session_state.get(
-    "gmail_emails",
-    {}
-)
+    st.write(
+        "AgentForge Email:",
+        user_email,
+    )
 
+    st.write(
+        "Gmail Connected:",
+        gmail_connected,
+    )
 
-# IMPORTANT:
-# Check Gmail connection using CURRENT USER ID.
-#
-# This prevents User A's Gmail connection from appearing
-# connected for User B.
-
-gmail_connected = (
-    user_id in gmail_tokens
-)
-
-
-gmail_email = gmail_emails.get(
-    user_id
-)
-
-
-# Keep compatibility with existing code.
-st.session_state[
-    "gmail_connected"
-] = gmail_connected
-
-st.session_state[
-    "gmail_email"
-] = gmail_email
+    st.write(
+        "Gmail Email:",
+        gmail_email,
+    )
 
 
 # ============================================================
@@ -180,429 +252,39 @@ st.session_state[
 
 from backend import (
     chatbot,
-    retrieve
+    retrieve,
 )
 
 
 # ============================================================
-# SESSION STATE FUNCTIONS
-# ============================================================
-
-def generate_thread_id():
-
-    return str(
-        uuid.uuid4()
-    )
-
-
-def add_thread(thread_id):
-
-    if "chat_threads" not in st.session_state:
-
-        st.session_state[
-            "chat_threads"
-        ] = []
-
-    if thread_id not in st.session_state[
-        "chat_threads"
-    ]:
-
-        st.session_state[
-            "chat_threads"
-        ].append(
-            thread_id
-        )
-
-
-def initialize_session_state():
-
-    if "message_history" not in st.session_state:
-
-        st.session_state[
-            "message_history"
-        ] = []
-
-
-    if "thread_id" not in st.session_state:
-
-        st.session_state[
-            "thread_id"
-        ] = generate_thread_id()
-
-
-    if "chat_threads" not in st.session_state:
-
-        try:
-
-            st.session_state[
-                "chat_threads"
-            ] = retrieve()
-
-        except Exception:
-
-            st.session_state[
-                "chat_threads"
-            ] = []
-
-
-    add_thread(
-        st.session_state[
-            "thread_id"
-        ]
-    )
-
-
-def reset_chat():
-
-    thread_id = generate_thread_id()
-
-    st.session_state[
-        "thread_id"
-    ] = thread_id
-
-    st.session_state[
-        "message_history"
-    ] = []
-
-    add_thread(
-        thread_id
-    )
-
-
-def load_conversation(thread_id):
-
-    try:
-
-        state = chatbot.get_state(
-            config={
-                "configurable": {
-                    "thread_id": thread_id
-                }
-            }
-        )
-
-        return state.values.get(
-            "messages",
-            []
-        )
-
-    except Exception as e:
-
-        st.error(
-            f"Unable to load conversation: {e}"
-        )
-
-        return []
-
-
-def switch_conversation(thread_id):
-
-    st.session_state[
-        "thread_id"
-    ] = thread_id
-
-    messages = load_conversation(
-        thread_id
-    )
-
-    history = []
-
-    for message in messages:
-
-        if isinstance(
-            message,
-            HumanMessage
-        ):
-
-            role = "user"
-
-        elif isinstance(
-            message,
-            AIMessage
-        ):
-
-            role = "assistant"
-
-        else:
-
-            continue
-
-
-        content = message.content
-
-        if (
-            isinstance(content, str)
-            and content.strip()
-        ):
-
-            history.append(
-                {
-                    "role": role,
-                    "content": content
-                }
-            )
-
-
-    st.session_state[
-        "message_history"
-    ] = history
-
-
-# ============================================================
-# INITIALIZE
-# ============================================================
-
-initialize_session_state()
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-
-    st.title(
-        "🤖 AI Assistant"
-    )
-
-    st.caption(
-        "LangGraph • Groq • Gmail • Web Search • Tools"
-    )
-
-    st.divider()
-
-
-    # ========================================================
-    # CURRENT USER
-    # ========================================================
-
-    st.success(
-        f"👤 {current_user}"
-    )
-
-    st.divider()
-
-
-    # ========================================================
-    # GMAIL
-    # ========================================================
-
-    if gmail_connected:
-
-        st.success(
-            "📧 Gmail Connected"
-        )
-
-        if gmail_email:
-
-            st.caption(
-                f"Sending as: {gmail_email}"
-            )
-
-        else:
-
-            st.caption(
-                f"Sending as: {current_user}"
-            )
-
-
-    else:
-
-        st.warning(
-            "📧 Gmail Not Connected"
-        )
-
-        st.caption(
-            "Connect your Gmail before sending emails."
-        )
-
-        if st.button(
-            "🔗 Connect My Gmail",
-            use_container_width=True
-        ):
-
-            try:
-
-                gmail_url = connect_gmail()
-
-                if gmail_url:
-
-                    # Mark OAuth as active BEFORE
-                    # redirecting to Google.
-                    st.session_state[
-                        "gmail_oauth_in_progress"
-                    ] = True
-
-                    # Direct browser redirect.
-                    st.markdown(
-                        f"""
-                        <script>
-                            window.top.location.href = "{gmail_url}";
-                        </script>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                    st.stop()
-
-            except Exception as e:
-
-                st.error(
-                    f"Gmail connection error: {e}"
-                )
-
-
-    st.divider()
-
-
-    # ========================================================
-    # NEW CHAT
-    # ========================================================
-
-    if st.button(
-        "➕ New Chat",
-        use_container_width=True
-    ):
-
-        reset_chat()
-
-        st.rerun()
-
-
-    st.divider()
-
-
-    # ========================================================
-    # CONVERSATIONS
-    # ========================================================
-
-    st.subheader(
-        "💬 Conversations"
-    )
-
-    threads = st.session_state[
-        "chat_threads"
-    ]
-
-
-    if not threads:
-
-        st.caption(
-            "No previous conversations."
-        )
-
-    else:
-
-        for thread_id in reversed(
-            threads
-        ):
-
-            display_id = str(
-                thread_id
-            )[:8]
-
-
-            is_current = (
-                str(thread_id)
-                ==
-                str(
-                    st.session_state[
-                        "thread_id"
-                    ]
-                )
-            )
-
-
-            button_label = (
-                f"🟢 {display_id}"
-                if is_current
-                else f"💬 {display_id}"
-            )
-
-
-            if st.button(
-                button_label,
-                key=f"thread_{thread_id}",
-                use_container_width=True
-            ):
-
-                switch_conversation(
-                    thread_id
-                )
-
-                st.rerun()
-
-
-    st.divider()
-
-
-    # ========================================================
-    # LOGOUT
-    # ========================================================
-
-    if st.button(
-        "🚪 Logout",
-        use_container_width=True
-    ):
-
-        # Clear only current session data.
-        st.session_state.pop(
-            "gmail_oauth_in_progress",
-            None
-        )
-
-        st.session_state.pop(
-            "gmail_connected",
-            None
-        )
-
-        st.session_state.pop(
-            "gmail_email",
-            None
-        )
-
-        st.logout()
-
-
-    st.caption(
-        "Powered by LangGraph + Groq"
-    )
-
-
-# ============================================================
-# MAIN HEADER
+# MAIN PAGE
 # ============================================================
 
 st.title(
-    "🤖 LangGraph AI Assistant"
+    "🤖 AgentForge AI"
 )
 
-st.markdown(
-    """
-Ask questions, perform calculations,
-search the web, check stock prices,
-or send emails using natural language.
-"""
+st.caption(
+    f"Logged in as: {user_email}"
 )
 
 
 # ============================================================
-# CURRENT THREAD
+# GMAIL STATUS ON MAIN PAGE
 # ============================================================
 
-with st.expander(
-    "Conversation Details",
-    expanded=False
-):
+if gmail_connected:
 
-    st.write(
-        f"**Thread ID:** "
-        f"`{st.session_state['thread_id']}`"
+    st.success(
+        f"📧 Gmail connected: {gmail_email}"
     )
 
-    st.write(
-        f"**Messages:** "
-        f"{len(st.session_state['message_history'])}"
+else:
+
+    st.warning(
+        "📧 Gmail is not connected. "
+        "Connect Gmail from the sidebar if you want "
+        "the agent to send emails."
     )
 
 
@@ -610,73 +292,45 @@ with st.expander(
 # CHAT HISTORY
 # ============================================================
 
-for message in st.session_state[
-    "message_history"
-]:
+if "messages" not in st.session_state:
 
-    with st.chat_message(
-        message["role"]
+    st.session_state.messages = []
+
+
+# ============================================================
+# DISPLAY CHAT HISTORY
+# ============================================================
+
+for message in st.session_state.messages:
+
+    if isinstance(
+        message,
+        HumanMessage,
     ):
 
-        st.markdown(
-            message["content"]
-        )
+        with st.chat_message("user"):
 
+            st.markdown(
+                message.content
+            )
 
-# ============================================================
-# EMPTY STATE
-# ============================================================
+    elif isinstance(
+        message,
+        AIMessage,
+    ):
 
-if not st.session_state[
-    "message_history"
-]:
+        with st.chat_message("assistant"):
 
-    st.info(
-        "👋 Welcome! Ask me anything or "
-        "try one of these:"
-    )
-
-    col1, col2, col3 = st.columns(3)
-
-
-    with col1:
-
-        st.markdown(
-            """
-**🧮 Calculator**
-
-`Calculate 125 * 48`
-"""
-        )
-
-
-    with col2:
-
-        st.markdown(
-            """
-**📈 Stock Price**
-
-`What is the latest AAPL price?`
-"""
-        )
-
-
-    with col3:
-
-        st.markdown(
-            """
-**🌐 Web Search**
-
-`Search the web for the latest AI news`
-"""
-        )
+            st.markdown(
+                message.content
+            )
 
 
 # ============================================================
 # CHAT INPUT
 # ============================================================
 
-user_input = st.chat_input(
+prompt = st.chat_input(
     "Ask me anything..."
 )
 
@@ -685,128 +339,114 @@ user_input = st.chat_input(
 # PROCESS USER MESSAGE
 # ============================================================
 
-if user_input:
+if prompt:
 
-    # --------------------------------------------------------
+    # ========================================================
     # USER MESSAGE
-    # --------------------------------------------------------
+    # ========================================================
 
-    st.session_state[
-        "message_history"
-    ].append(
-        {
-            "role": "user",
-            "content": user_input
-        }
+    human_message = HumanMessage(
+        content=prompt
     )
 
+    st.session_state.messages.append(
+        human_message
+    )
 
     with st.chat_message("user"):
 
         st.markdown(
-            user_input
+            prompt
         )
 
 
-    # --------------------------------------------------------
-    # CONFIG
-    # --------------------------------------------------------
-
-    config = {
-
-        "configurable": {
-
-            "thread_id":
-                st.session_state[
-                    "thread_id"
-                ]
-
-        }
-
-    }
-
-
-    # --------------------------------------------------------
+    # ========================================================
     # RUN AGENT
-    # --------------------------------------------------------
+    # ========================================================
 
-    with st.chat_message("assistant"):
+    try:
 
-        response_container = st.empty()
+        with st.chat_message("assistant"):
 
-        full_response = ""
-
-
-        try:
-
-            for (
-                message_chunk,
-                metadata
-            ) in chatbot.stream(
-
+            response = chatbot.invoke(
                 {
                     "messages": [
-                        HumanMessage(
-                            content=user_input
-                        )
+                        human_message
                     ]
-                },
+                }
+            )
 
-                config=config,
 
-                stream_mode="messages"
+            # =================================================
+            # EXTRACT RESPONSE
+            # =================================================
 
+            if isinstance(
+                response,
+                dict,
             ):
 
-                if isinstance(
-                    message_chunk,
-                    AIMessage
-                ):
+                response_messages = response.get(
+                    "messages",
+                    [],
+                )
 
-                    content = (
-                        message_chunk.content
+                if response_messages:
+
+                    final_message = (
+                        response_messages[-1]
                     )
 
-
-                    if isinstance(
-                        content,
-                        str
+                    if hasattr(
+                        final_message,
+                        "content",
                     ):
 
-                        full_response += (
-                            content
+                        answer = (
+                            final_message.content
                         )
 
-                        response_container.markdown(
-                            full_response
+                    else:
+
+                        answer = str(
+                            final_message
                         )
 
+                else:
 
-        except Exception as e:
+                    answer = str(
+                        response
+                    )
 
-            full_response = (
-                f"⚠️ Sorry, something went wrong: {e}"
+            else:
+
+                answer = str(
+                    response
+                )
+
+
+            # =================================================
+            # SHOW RESPONSE
+            # =================================================
+
+            st.markdown(
+                answer
             )
 
-            response_container.error(
-                full_response
+
+        # ====================================================
+        # SAVE ASSISTANT MESSAGE
+        # ====================================================
+
+        st.session_state.messages.append(
+            AIMessage(
+                content=answer
             )
-
-
-    # --------------------------------------------------------
-    # SAVE ASSISTANT MESSAGE
-    # --------------------------------------------------------
-
-    if full_response:
-
-        st.session_state[
-            "message_history"
-        ].append(
-            {
-                "role": "assistant",
-                "content": full_response
-            }
         )
 
 
-    st.rerun()
+    except Exception as e:
+
+        st.error(
+            f"❌ Agent error: {e}"
+        )
