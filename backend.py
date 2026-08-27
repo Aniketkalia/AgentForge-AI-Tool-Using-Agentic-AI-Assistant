@@ -1,53 +1,84 @@
+# backend.py
+
 import os
-import json
 import base64
-import sqlite3
 import requests
+
 from email.message import EmailMessage
+
 from typing import TypedDict, Annotated
 
 import streamlit as st
+
 from dotenv import load_dotenv
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import (
+    BaseMessage,
+    SystemMessage,
+)
+
 from langchain_core.tools import tool
+
 from langchain_groq import ChatGroq
-from langchain_community.tools import DuckDuckGoSearchRun
 
-from langgraph.graph import StateGraph, START
+from langchain_community.tools import (
+    DuckDuckGoSearchRun
+)
+
+from langgraph.graph import (
+    StateGraph,
+    START,
+)
+
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.sqlite import SqliteSaver
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
+from langgraph.prebuilt import (
+    ToolNode,
+    tools_condition,
+)
+
+from langgraph.checkpoint.sqlite import (
+    SqliteSaver
+)
+
+import sqlite3
 
 
 # ============================================================
-# CONFIGURATION
+# LOAD ENVIRONMENT
 # ============================================================
 
 load_dotenv()
-
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.send"
-]
 
 
 # ============================================================
 # STREAMLIT SECRETS
 # ============================================================
 
-# Groq API key
 if "GROQ_API_KEY" in st.secrets:
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+
+    os.environ["GROQ_API_KEY"] = (
+        st.secrets["GROQ_API_KEY"]
+    )
 
 
-# Alpha Vantage API key
 ALPHA_VANTAGE_API_KEY = st.secrets.get(
     "ALPHA_VANTAGE_API_KEY",
     os.getenv("ALPHA_VANTAGE_API_KEY")
+)
+
+
+# ============================================================
+# GMAIL SERVICE
+#
+# IMPORTANT:
+# Use gmail_auth.py.
+#
+# DO NOT create another Gmail authentication system here.
+# ============================================================
+
+from gmail_auth import (
+    get_gmail_service,
 )
 
 
@@ -56,78 +87,11 @@ ALPHA_VANTAGE_API_KEY = st.secrets.get(
 # ============================================================
 
 model = ChatGroq(
+
     model="openai/gpt-oss-120b",
-    temperature=0.3
+
+    temperature=0.3,
 )
-
-
-# ============================================================
-# GMAIL SERVICE
-# ============================================================
-
-# ============================================================
-# GMAIL SERVICE — CURRENT LOGGED-IN USER
-# ============================================================
-
-def get_gmail_service():
-
-    try:
-        # Make sure user is logged in
-        if not st.user.is_logged_in:
-            raise Exception("Please login with Google first.")
-
-        # Unique Google user ID
-        user_id = st.user.get("sub")
-
-        if not user_id:
-            raise Exception("Unable to identify the logged-in user.")
-
-        # Get Gmail token for THIS user
-        gmail_tokens = st.session_state.get("gmail_tokens", {})
-
-        token_data = gmail_tokens.get(user_id)
-
-        if not token_data:
-            raise Exception(
-                "Gmail is not connected for this account. "
-                "Please connect your Gmail first."
-            )
-
-        creds = Credentials.from_authorized_user_info(
-            token_data,
-            SCOPES
-        )
-
-        # Refresh expired token
-        if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-
-            # Save updated token
-            gmail_tokens[user_id] = json.loads(
-                creds.to_json()
-            )
-
-            st.session_state["gmail_tokens"] = gmail_tokens
-
-        if not creds.valid:
-            raise Exception(
-                "Gmail credentials are invalid or expired. "
-                "Please reconnect Gmail."
-            )
-
-        service = build(
-            "gmail",
-            "v1",
-            credentials=creds,
-            cache_discovery=False
-        )
-
-        return service
-
-    except Exception as e:
-        raise Exception(
-            f"Gmail authentication error: {str(e)}"
-        )
 
 
 # ============================================================
@@ -138,54 +102,97 @@ def get_gmail_service():
 def send_email(
     to: str,
     subject: str,
-    body: str
+    body: str,
 ) -> str:
     """
-    Send an email using the currently logged-in user's Gmail.
+    Send an email using the currently
+    connected Gmail account.
     """
 
     try:
 
+        # ----------------------------------------------------
+        # GET CURRENT USER'S GMAIL SERVICE
+        # ----------------------------------------------------
+
         service = get_gmail_service()
+
+        if service is None:
+
+            return (
+                "EMAIL_FAILED: Gmail is not connected. "
+                "Please connect Gmail first."
+            )
+
+        # ----------------------------------------------------
+        # CREATE EMAIL
+        # ----------------------------------------------------
 
         message = EmailMessage()
 
         message["To"] = to
+
         message["Subject"] = subject
 
         message.set_content(body)
 
-        encoded_message = base64.urlsafe_b64encode(
-            message.as_bytes()
-        ).decode()
+        # ----------------------------------------------------
+        # ENCODE
+        # ----------------------------------------------------
+
+        encoded_message = (
+            base64.urlsafe_b64encode(
+                message.as_bytes()
+            )
+            .decode()
+        )
 
         request_body = {
             "raw": encoded_message
         }
+
+        # ----------------------------------------------------
+        # SEND
+        # ----------------------------------------------------
 
         response = (
             service.users()
             .messages()
             .send(
                 userId="me",
-                body=request_body
+                body=request_body,
             )
             .execute()
         )
 
+        message_id = response.get(
+            "id",
+            "unknown"
+        )
+
+        sender = (
+            st.user.email
+            if st.user.is_logged_in
+            else "Gmail account"
+        )
+
         return (
-            f"Email sent successfully from "
-            f"{st.user.email}. "
-            f"Message ID: {response['id']}"
+            "EMAIL_SENT: "
+            f"Email successfully sent from "
+            f"{sender} to {to}. "
+            f"Message ID: {message_id}"
         )
 
     except Exception as e:
 
-        return f"Failed to send email: {str(e)}"
+        return (
+            "EMAIL_FAILED: "
+            f"{str(e)}"
+        )
 
 
 # ============================================================
-# WEB SEARCH TOOL
+# WEB SEARCH
 # ============================================================
 
 search_tool = DuckDuckGoSearchRun(
@@ -194,19 +201,19 @@ search_tool = DuckDuckGoSearchRun(
 
 
 # ============================================================
-# CALCULATOR TOOL
+# CALCULATOR
 # ============================================================
 
 @tool
 def calculator(
     first_num: float,
     second_num: float,
-    operation: str
+    operation: str,
 ) -> dict:
     """
-    Perform basic arithmetic operations.
+    Perform basic arithmetic.
 
-    Supported operations:
+    Supported:
     add
     sub
     mul
@@ -215,44 +222,71 @@ def calculator(
 
     try:
 
-        operation = operation.lower().strip()
+        operation = (
+            operation
+            .lower()
+            .strip()
+        )
 
         if operation == "add":
 
-            result = first_num + second_num
+            result = (
+                first_num
+                +
+                second_num
+            )
 
         elif operation == "sub":
 
-            result = first_num - second_num
+            result = (
+                first_num
+                -
+                second_num
+            )
 
         elif operation == "mul":
 
-            result = first_num * second_num
+            result = (
+                first_num
+                *
+                second_num
+            )
 
         elif operation == "div":
 
             if second_num == 0:
 
                 return {
-                    "error": "Division by zero is not allowed"
+                    "error":
+                    "Division by zero is not allowed."
                 }
 
-            result = first_num / second_num
+            result = (
+                first_num
+                /
+                second_num
+            )
 
         else:
 
             return {
-                "error": (
-                    f"Unsupported operation '{operation}'. "
-                    "Use add, sub, mul, or div."
-                )
+                "error":
+                "Use add, sub, mul, or div."
             }
 
         return {
-            "first_num": first_num,
-            "second_num": second_num,
-            "operation": operation,
-            "result": result
+
+            "first_num":
+                first_num,
+
+            "second_num":
+                second_num,
+
+            "operation":
+                operation,
+
+            "result":
+                result,
         }
 
     except Exception as e:
@@ -263,18 +297,15 @@ def calculator(
 
 
 # ============================================================
-# STOCK PRICE TOOL
+# STOCK PRICE
 # ============================================================
 
 @tool
-def get_stock_price(symbol: str) -> dict:
+def get_stock_price(
+    symbol: str,
+) -> dict:
     """
-    Fetch the latest stock price for a given symbol.
-
-    Examples:
-    AAPL
-    TSLA
-    MSFT
+    Get latest stock price.
     """
 
     try:
@@ -282,28 +313,31 @@ def get_stock_price(symbol: str) -> dict:
         if not ALPHA_VANTAGE_API_KEY:
 
             return {
-                "error": "Alpha Vantage API key is not configured."
+                "error":
+                "Alpha Vantage API key is not configured."
             }
 
-        symbol = symbol.upper().strip()
+        symbol = (
+            symbol
+            .upper()
+            .strip()
+        )
 
         url = (
             "https://www.alphavantage.co/query"
-            f"?function=GLOBAL_QUOTE"
+            "?function=GLOBAL_QUOTE"
             f"&symbol={symbol}"
             f"&apikey={ALPHA_VANTAGE_API_KEY}"
         )
 
         response = requests.get(
             url,
-            timeout=15
+            timeout=15,
         )
 
         response.raise_for_status()
 
-        data = response.json()
-
-        return data
+        return response.json()
 
     except Exception as e:
 
@@ -317,10 +351,14 @@ def get_stock_price(symbol: str) -> dict:
 # ============================================================
 
 tools = [
+
     get_stock_price,
+
     search_tool,
+
     calculator,
-    send_email
+
+    send_email,
 ]
 
 
@@ -328,7 +366,9 @@ tools = [
 # LLM WITH TOOLS
 # ============================================================
 
-llm_with_tools = model.bind_tools(tools)
+llm_with_tools = model.bind_tools(
+    tools
+)
 
 
 # ============================================================
@@ -339,7 +379,7 @@ class ChatState(TypedDict):
 
     messages: Annotated[
         list[BaseMessage],
-        add_messages
+        add_messages,
     ]
 
 
@@ -347,60 +387,82 @@ class ChatState(TypedDict):
 # CHAT NODE
 # ============================================================
 
-def chat_node(state: ChatState):
+def chat_node(
+    state: ChatState
+):
 
     system_instruction = """
-You are an AI assistant with access to tools.
+You are AgentForge AI, a tool-using AI assistant.
 
 Available tools:
 
 1. send_email
-   Send an email using Gmail.
+   Sends an email through the user's connected Gmail.
 
 2. calculator
-   Perform arithmetic calculations.
+   Performs arithmetic.
 
 3. get_stock_price
-   Get the latest stock price.
+   Gets current stock prices.
 
 4. duckduckgo_search
-   Search the web.
+   Searches the web.
 
-IMPORTANT RULES:
+IMPORTANT EMAIL RULES:
 
 1. If the user explicitly asks you to send an email,
-   ALWAYS call the send_email tool.
+   ALWAYS call send_email.
 
-2. Do not claim that an email was sent unless
-   the send_email tool actually returns a successful result.
+2. NEVER say an email was sent unless
+   send_email returns EMAIL_SENT.
 
-3. If the user provides a recipient, subject, and body,
-   use the send_email tool.
+3. If the user gives a recipient, subject,
+   and body, call send_email.
 
-4. For calculations, use the calculator tool when
-   accurate arithmetic is required.
+4. If the recipient is missing,
+   ask for the recipient.
 
-5. For current stock prices, use get_stock_price.
+5. If subject is missing,
+   ask for the subject.
 
-6. For current web information, use the search tool.
+6. If body is missing,
+   ask for the body.
 
-7. Do not fabricate tool results.
+7. If the send_email tool returns EMAIL_FAILED,
+   clearly tell the user that sending failed.
 
-8. Explain tool results clearly to the user.
+8. Never fabricate successful email delivery.
+
+CALCULATOR:
+
+Use calculator for arithmetic when appropriate.
+
+STOCK:
+
+Use get_stock_price for current stock prices.
+
+WEB:
+
+Use web search for current information.
+
+Always explain tool results clearly.
 """
 
     messages = state["messages"]
 
-    # Add system instruction only for this LLM call
-    from langchain_core.messages import SystemMessage
-
     messages_with_system = [
-        SystemMessage(content=system_instruction),
-        *messages
+
+        SystemMessage(
+            content=system_instruction
+        ),
+
+        *messages,
     ]
 
-    response = llm_with_tools.invoke(
-        messages_with_system
+    response = (
+        llm_with_tools.invoke(
+            messages_with_system
+        )
     )
 
     return {
@@ -409,23 +471,28 @@ IMPORTANT RULES:
 
 
 # ============================================================
-# LANGGRAPH TOOL NODE
+# TOOL NODE
 # ============================================================
 
-tool_node = ToolNode(tools)
+tool_node = ToolNode(
+    tools
+)
 
 
 # ============================================================
-# LANGGRAPH GRAPH
+# GRAPH
 # ============================================================
 
-graph = StateGraph(ChatState)
+graph = StateGraph(
+    ChatState
+)
 
 
 graph.add_node(
     "chat_node",
     chat_node
 )
+
 
 graph.add_node(
     "tools",
@@ -456,9 +523,12 @@ graph.add_edge(
 # ============================================================
 
 conn = sqlite3.connect(
+
     "chatbot.db",
-    check_same_thread=False
+
+    check_same_thread=False,
 )
+
 
 checkpointer = SqliteSaver(
     conn=conn
@@ -466,7 +536,7 @@ checkpointer = SqliteSaver(
 
 
 # ============================================================
-# COMPILE GRAPH
+# COMPILE
 # ============================================================
 
 chatbot = graph.compile(
@@ -499,12 +569,16 @@ def retrieve():
 
             if thread_id:
 
-                all_threads.add(thread_id)
+                all_threads.add(
+                    thread_id
+                )
 
     except Exception as e:
 
         print(
-            f"Error retrieving threads: {e}"
+            f"Thread retrieval error: {e}"
         )
 
-    return list(all_threads)
+    return list(
+        all_threads
+    )
