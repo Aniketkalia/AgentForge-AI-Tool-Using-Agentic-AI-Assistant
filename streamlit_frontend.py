@@ -1,57 +1,105 @@
 import uuid
 import streamlit as st
+
 from langchain_core.messages import HumanMessage, AIMessage
 
-st.set_page_config(
-    page_title="AgentForge AI",
-    page_icon="🤖",
-    layout="wide"
+# Gmail OAuth functions
+from gmail_auth import (
+    connect_gmail,
+    handle_gmail_callback
 )
 
-# ============================================================
-# GOOGLE LOGIN
-# ============================================================
 
-import streamlit as st
-
-if not st.user.is_logged_in:
-    st.title("🤖 AgentForge")
-    st.subheader("Tool-Using Agentic AI Assistant")
-
-    if st.button("🔐 Login with Google"):
-        st.login()
-
-    st.stop()
-
-current_user = st.user.email
-
-st.success(f"Logged in as {current_user}")
-
-
-# ============================================================
-# BACKEND — LOAD ONLY AFTER LOGIN
-# ============================================================
-
-from backend import chatbot, retrieve
-
-# ============================================================
-# LOGGED-IN USER
-# ============================================================
-
-st.sidebar.success(f"Logged in as {st.user.email}")
-
-if st.sidebar.button("Logout"):
-    st.logout()
 # ============================================================
 # PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
-    page_title="LangGraph AI Assistant",
+    page_title="AgentForge AI",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+
+# ============================================================
+# GOOGLE LOGIN
+# ============================================================
+
+if not st.user.is_logged_in:
+
+    st.title("🤖 AgentForge")
+
+    st.subheader(
+        "Tool-Using Agentic AI Assistant"
+    )
+
+    st.write(
+        "Login with Google to use AgentForge."
+    )
+
+    if st.button(
+        "🔐 Login with Google",
+        type="primary"
+    ):
+        st.login()
+
+    st.stop()
+
+
+# ============================================================
+# CURRENT LOGGED-IN USER
+# ============================================================
+
+current_user = st.user.email
+
+st.success(
+    f"Logged in as {current_user}"
+)
+
+
+# ============================================================
+# GMAIL OAUTH CALLBACK
+# ============================================================
+
+handle_gmail_callback()
+
+
+# ============================================================
+# CURRENT GOOGLE USER ID
+# ============================================================
+
+user_id = st.user.get("sub")
+
+if not user_id:
+
+    st.error(
+        "Unable to identify the logged-in Google user."
+    )
+
+    st.stop()
+
+
+# ============================================================
+# GMAIL TOKEN STORAGE
+# ============================================================
+
+if "gmail_tokens" not in st.session_state:
+
+    st.session_state["gmail_tokens"] = {}
+
+
+gmail_tokens = st.session_state["gmail_tokens"]
+
+gmail_connected = user_id in gmail_tokens
+
+
+# ============================================================
+# BACKEND
+# ============================================================
+
+# Backend is imported ONLY after Google login.
+from backend import chatbot, retrieve
 
 
 # ============================================================
@@ -60,29 +108,49 @@ st.set_page_config(
 
 def generate_thread_id() -> str:
     """Generate a unique conversation/thread ID."""
+
     return str(uuid.uuid4())
+
+
+def add_thread(thread_id: str):
+    """Add a thread if it doesn't already exist."""
+
+    if thread_id not in st.session_state["chat_threads"]:
+
+        st.session_state["chat_threads"].append(
+            thread_id
+        )
 
 
 def initialize_session_state():
     """Initialize Streamlit session state."""
 
     if "message_history" not in st.session_state:
+
         st.session_state["message_history"] = []
 
+
     if "thread_id" not in st.session_state:
-        st.session_state["thread_id"] = generate_thread_id()
+
+        st.session_state["thread_id"] = (
+            generate_thread_id()
+        )
+
 
     if "chat_threads" not in st.session_state:
-        st.session_state["chat_threads"] = retrieve()
 
-    add_thread(st.session_state["thread_id"])
+        try:
+
+            st.session_state["chat_threads"] = retrieve()
+
+        except Exception:
+
+            st.session_state["chat_threads"] = []
 
 
-def add_thread(thread_id: str):
-    """Add a thread to the session thread list if it doesn't exist."""
-
-    if thread_id not in st.session_state["chat_threads"]:
-        st.session_state["chat_threads"].append(thread_id)
+    add_thread(
+        st.session_state["thread_id"]
+    )
 
 
 # ============================================================
@@ -95,6 +163,7 @@ def reset_chat():
     thread_id = generate_thread_id()
 
     st.session_state["thread_id"] = thread_id
+
     st.session_state["message_history"] = []
 
     add_thread(thread_id)
@@ -113,7 +182,10 @@ def load_conversation(thread_id: str):
             }
         )
 
-        return state.values.get("messages", [])
+        return state.values.get(
+            "messages",
+            []
+        )
 
     except Exception as e:
 
@@ -129,29 +201,41 @@ def switch_conversation(thread_id: str):
 
     st.session_state["thread_id"] = thread_id
 
-    messages = load_conversation(thread_id)
+    messages = load_conversation(
+        thread_id
+    )
 
     history = []
 
     for message in messages:
 
-        if isinstance(message, HumanMessage):
+        if isinstance(
+            message,
+            HumanMessage
+        ):
 
             role = "user"
 
-        elif isinstance(message, AIMessage):
+        elif isinstance(
+            message,
+            AIMessage
+        ):
 
             role = "assistant"
 
         else:
 
-            # Ignore tool/system messages in UI
+            # Ignore tool/system messages
             continue
 
-        # AI messages can sometimes contain non-string content
+
         content = message.content
 
-        if isinstance(content, str) and content.strip():
+
+        if isinstance(
+            content,
+            str
+        ) and content.strip():
 
             history.append(
                 {
@@ -160,7 +244,10 @@ def switch_conversation(thread_id: str):
                 }
             )
 
-    st.session_state["message_history"] = history
+
+    st.session_state[
+        "message_history"
+    ] = history
 
 
 # ============================================================
@@ -184,20 +271,82 @@ with st.sidebar:
 
     st.divider()
 
-    # New chat button
+
+    # ========================================================
+    # CURRENT USER
+    # ========================================================
+
+    st.success(
+        f"👤 {current_user}"
+    )
+
+
+    # ========================================================
+    # GMAIL CONNECTION
+    # ========================================================
+
+    if gmail_connected:
+
+        st.success(
+            "📧 Gmail Connected"
+        )
+
+        st.caption(
+            f"Sending as: {current_user}"
+        )
+
+    else:
+
+        st.warning(
+            "📧 Gmail Not Connected"
+        )
+
+        st.caption(
+            "Connect your Gmail to allow "
+            "AgentForge to send emails."
+        )
+
+        gmail_url = connect_gmail()
+
+        st.link_button(
+            "🔗 Connect My Gmail",
+            gmail_url,
+            use_container_width=True
+        )
+
+
+    st.divider()
+
+
+    # ========================================================
+    # NEW CHAT
+    # ========================================================
+
     if st.button(
         "➕ New Chat",
         use_container_width=True
     ):
 
         reset_chat()
+
         st.rerun()
+
 
     st.divider()
 
-    st.subheader("💬 Conversations")
 
-    threads = st.session_state["chat_threads"]
+    # ========================================================
+    # CONVERSATIONS
+    # ========================================================
+
+    st.subheader(
+        "💬 Conversations"
+    )
+
+    threads = st.session_state[
+        "chat_threads"
+    ]
+
 
     if not threads:
 
@@ -209,13 +358,21 @@ with st.sidebar:
 
         for thread_id in reversed(threads):
 
-            # Shorter ID for cleaner UI
-            display_id = str(thread_id)[:8]
+            display_id = str(
+                thread_id
+            )[:8]
+
 
             is_current = (
                 str(thread_id)
-                == str(st.session_state["thread_id"])
+                ==
+                str(
+                    st.session_state[
+                        "thread_id"
+                    ]
+                )
             )
+
 
             button_label = (
                 f"🟢 {display_id}"
@@ -223,16 +380,34 @@ with st.sidebar:
                 else f"💬 {display_id}"
             )
 
+
             if st.button(
                 button_label,
                 key=f"thread_{thread_id}",
                 use_container_width=True
             ):
 
-                switch_conversation(thread_id)
+                switch_conversation(
+                    thread_id
+                )
+
                 st.rerun()
 
+
     st.divider()
+
+
+    # ========================================================
+    # LOGOUT
+    # ========================================================
+
+    if st.button(
+        "🚪 Logout",
+        use_container_width=True
+    ):
+
+        st.logout()
+
 
     st.caption(
         "Powered by LangGraph + Groq"
@@ -243,12 +418,15 @@ with st.sidebar:
 # MAIN HEADER
 # ============================================================
 
-st.title("🤖 LangGraph AI Assistant")
+st.title(
+    "🤖 LangGraph AI Assistant"
+)
 
 st.markdown(
     """
-Ask questions, perform calculations, search the web,
-check stock prices, or send emails using natural language.
+Ask questions, perform calculations,
+search the web, check stock prices,
+or send emails using natural language.
 """
 )
 
@@ -263,7 +441,8 @@ with st.expander(
 ):
 
     st.write(
-        f"**Thread ID:** `{st.session_state['thread_id']}`"
+        f"**Thread ID:** "
+        f"`{st.session_state['thread_id']}`"
     )
 
     st.write(
@@ -276,10 +455,14 @@ with st.expander(
 # DISPLAY CHAT HISTORY
 # ============================================================
 
-for message in st.session_state["message_history"]:
+for message in st.session_state[
+    "message_history"
+]:
 
     role = message["role"]
+
     content = message["content"]
+
 
     with st.chat_message(role):
 
@@ -290,42 +473,49 @@ for message in st.session_state["message_history"]:
 # EMPTY STATE
 # ============================================================
 
-if not st.session_state["message_history"]:
+if not st.session_state[
+    "message_history"
+]:
 
     st.info(
-        "👋 Welcome! Ask me anything or try one of these:"
+        "👋 Welcome! Ask me anything or "
+        "try one of these:"
     )
 
+
     col1, col2, col3 = st.columns(3)
+
 
     with col1:
 
         st.markdown(
             """
-            **🧮 Calculator**
+**🧮 Calculator**
 
-            `Calculate 125 * 48`
-            """
+`Calculate 125 * 48`
+"""
         )
+
 
     with col2:
 
         st.markdown(
             """
-            **📈 Stock Price**
+**📈 Stock Price**
 
-            `What is the latest AAPL price?`
-            """
+`What is the latest AAPL price?`
+"""
         )
+
 
     with col3:
 
         st.markdown(
             """
-            **🌐 Web Search**
+**🌐 Web Search**
 
-            `Search the web for the latest AI news`
-            """
+`Search the web for the latest AI news`
+"""
         )
 
 
@@ -348,12 +538,15 @@ if user_input:
     # Add user message to UI history
     # --------------------------------------------------------
 
-    st.session_state["message_history"].append(
+    st.session_state[
+        "message_history"
+    ].append(
         {
             "role": "user",
             "content": user_input
         }
     )
+
 
     # --------------------------------------------------------
     # Display user message
@@ -361,7 +554,10 @@ if user_input:
 
     with st.chat_message("user"):
 
-        st.markdown(user_input)
+        st.markdown(
+            user_input
+        )
+
 
     # --------------------------------------------------------
     # LangGraph configuration
@@ -369,9 +565,13 @@ if user_input:
 
     config = {
         "configurable": {
-            "thread_id": st.session_state["thread_id"]
+            "thread_id":
+                st.session_state[
+                    "thread_id"
+                ]
         }
     }
+
 
     # --------------------------------------------------------
     # Stream assistant response
@@ -383,9 +583,11 @@ if user_input:
 
         full_response = ""
 
+
         try:
 
             for message_chunk, metadata in chatbot.stream(
+
                 {
                     "messages": [
                         HumanMessage(
@@ -393,9 +595,12 @@ if user_input:
                         )
                     ]
                 },
+
                 config=config,
+
                 stream_mode="messages"
             ):
+
 
                 # Only display AI messages
                 if isinstance(
@@ -403,9 +608,11 @@ if user_input:
                     AIMessage
                 ):
 
-                    content = message_chunk.content
+                    content = (
+                        message_chunk.content
+                    )
 
-                    # Make sure content is text
+
                     if isinstance(
                         content,
                         str
@@ -417,6 +624,7 @@ if user_input:
                             full_response
                         )
 
+
         except Exception as e:
 
             full_response = (
@@ -427,17 +635,21 @@ if user_input:
                 full_response
             )
 
+
     # --------------------------------------------------------
     # Save assistant response
     # --------------------------------------------------------
 
     if full_response:
 
-        st.session_state["message_history"].append(
+        st.session_state[
+            "message_history"
+        ].append(
             {
                 "role": "assistant",
                 "content": full_response
             }
         )
+
 
     st.rerun()
