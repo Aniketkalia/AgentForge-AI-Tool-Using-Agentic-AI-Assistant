@@ -23,7 +23,9 @@ if not st.user.is_logged_in:
 
     st.stop()
 
-st.success(f"Logged in as {st.user.email}")
+current_user = st.user.email
+
+st.success(f"Logged in as {current_user}")
 
 
 # ============================================================
