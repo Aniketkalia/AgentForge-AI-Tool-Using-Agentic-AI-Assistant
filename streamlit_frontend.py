@@ -12,17 +12,19 @@ st.set_page_config(
 # GOOGLE LOGIN
 # ============================================================
 
+import streamlit as st
+
 if not st.user.is_logged_in:
-
-    st.title("🤖 AgentForge AI")
+    st.title("🤖 AgentForge")
     st.subheader("Tool-Using Agentic AI Assistant")
-
-    st.write("Please login with your Google account to continue.")
 
     if st.button("🔐 Login with Google"):
         st.login()
 
     st.stop()
+
+st.success(f"Logged in as {st.user.email}")
+
 
 # ============================================================
 # BACKEND — LOAD ONLY AFTER LOGIN
