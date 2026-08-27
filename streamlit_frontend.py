@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 
 from langchain_core.messages import (
@@ -26,22 +27,54 @@ st.set_page_config(
 
 
 # ============================================================
-# GMAIL CALLBACK
+# 1. HANDLE GMAIL OAUTH CALLBACK FIRST
+# ============================================================
+#
+# Google redirects to:
+#
+# https://your-app.streamlit.app/
+#       ?code=XXXX
+#       &state=XXXX
+#
+# This MUST be handled before the normal UI.
 # ============================================================
 
 if "code" in st.query_params:
 
-    success = handle_gmail_callback()
+    try:
 
-    if success:
+        success = handle_gmail_callback()
 
-        st.session_state["gmail_connected"] = True
+        if success:
 
-        st.rerun()
+            # Callback already saved the Gmail account/token
+            # in persistent storage.
+
+            st.session_state["gmail_connected"] = True
+
+            # Force fresh page state
+            st.rerun()
+
+        else:
+
+            # Do not rerun on failure.
+            # The callback function should display the error.
+
+            st.stop()
+
+    except Exception as e:
+
+        st.error(
+            f"❌ Gmail callback error: {e}"
+        )
+
+        st.query_params.clear()
+
+        st.stop()
 
 
 # ============================================================
-# AGENTFORGE GOOGLE LOGIN
+# 2. AGENTFORGE GOOGLE LOGIN
 # ============================================================
 
 if not st.user.is_logged_in:
@@ -67,25 +100,58 @@ if not st.user.is_logged_in:
 
 
 # ============================================================
-# CURRENT USER
+# 3. CURRENT AGENTFORGE USER
 # ============================================================
 
 user_email = st.user.email
 user_id = st.user.get("sub")
 
 
+if not user_id:
+
+    st.error(
+        "❌ Unable to identify the logged-in Google user."
+    )
+
+    st.stop()
+
+
 # ============================================================
-# LOAD GMAIL STATUS FROM PERSISTENT STORAGE
+# 4. LOAD GMAIL CONNECTION FROM PERSISTENT STORAGE
+# ============================================================
+#
+# DO NOT depend on:
+#
+# st.session_state["gmail_connected"]
+#
+# because Streamlit session state can disappear after refresh.
+#
+# Instead, ask gmail_auth.py every time.
 # ============================================================
 
-gmail_email = get_connected_gmail_email()
+try:
 
-gmail_connected = (
-    gmail_email is not None
-)
+    gmail_email = get_connected_gmail_email()
+
+    gmail_connected = (
+        gmail_email is not None
+        and gmail_email != ""
+    )
+
+except Exception as e:
+
+    gmail_connected = False
+    gmail_email = None
+
+    st.sidebar.error(
+        f"Gmail status error: {e}"
+    )
 
 
-# Keep session cache synchronized
+# ============================================================
+# 5. SYNCHRONIZE SESSION CACHE
+# ============================================================
+
 st.session_state["gmail_connected"] = gmail_connected
 st.session_state["gmail_email"] = gmail_email
 
@@ -94,7 +160,14 @@ st.session_state["gmail_email"] = gmail_email
 # SIDEBAR
 # ============================================================
 
-st.sidebar.title("🤖 AgentForge")
+st.sidebar.title(
+    "🤖 AgentForge"
+)
+
+
+# ============================================================
+# CURRENT USER
+# ============================================================
 
 st.sidebar.success(
     f"👤 {user_email}"
@@ -102,7 +175,7 @@ st.sidebar.success(
 
 
 # ============================================================
-# GMAIL
+# GMAIL SECTION
 # ============================================================
 
 st.sidebar.markdown("---")
@@ -111,6 +184,10 @@ st.sidebar.subheader(
     "📧 Gmail"
 )
 
+
+# ============================================================
+# CONNECTED
+# ============================================================
 
 if gmail_connected:
 
@@ -122,6 +199,15 @@ if gmail_connected:
         gmail_email
     )
 
+    st.sidebar.info(
+        "Your agent can send email using this Gmail account."
+    )
+
+
+# ============================================================
+# NOT CONNECTED
+# ============================================================
+
 else:
 
     st.sidebar.info(
@@ -131,37 +217,69 @@ else:
     if st.sidebar.button(
         "🔗 Connect My Gmail",
         use_container_width=True,
+        type="primary",
     ):
 
         try:
 
             auth_url = connect_gmail()
 
-            if auth_url:
+            if not auth_url:
 
-                # Same-tab redirect
-                st.markdown(
-                    f"""
-                    <script>
-                        window.top.location.href =
-                        {auth_url!r};
-                    </script>
-                    """,
-                    unsafe_allow_html=True,
+                st.error(
+                    "❌ Unable to create Gmail authorization URL."
                 )
 
                 st.stop()
 
-            else:
 
-                st.error(
-                    "Unable to start Gmail authorization."
-                )
+            # =================================================
+            # SAME-TAB REDIRECT
+            # =================================================
+            #
+            # No popup.
+            # No new Chrome tab.
+            #
+            # The browser navigates the current page to Google.
+            # =================================================
+
+            safe_url = html.escape(
+                auth_url,
+                quote=True,
+            )
+
+            st.markdown(
+                f"""
+                <meta
+                    http-equiv="refresh"
+                    content="0;url={safe_url}"
+                >
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
+                f"""
+                <p>
+                    Redirecting to Google Gmail authorization...
+                </p>
+
+                <p>
+                    If you are not redirected automatically,
+                    <a href="{safe_url}" target="_self">
+                        click here to connect Gmail
+                    </a>.
+                </p>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.stop()
 
         except Exception as e:
 
             st.error(
-                f"Gmail authorization error: {e}"
+                f"❌ Gmail authorization error: {e}"
             )
 
 
@@ -171,24 +289,31 @@ else:
 
 st.sidebar.markdown("---")
 
+
 if st.sidebar.button(
     "🚪 Logout",
     use_container_width=True,
 ):
 
+    # Clear only temporary UI state.
+    #
+    # DO NOT delete the persistent Gmail token here.
+    # That allows the Gmail connection to survive
+    # browser refresh/login sessions.
+
     st.session_state.pop(
         "gmail_connected",
-        None
+        None,
     )
 
     st.session_state.pop(
         "gmail_email",
-        None
+        None,
     )
 
     st.session_state.pop(
         "gmail_oauth_state",
-        None
+        None,
     )
 
     st.logout()
@@ -198,26 +323,28 @@ if st.sidebar.button(
 # DEBUG
 # ============================================================
 
-with st.sidebar.expander("🔧 Debug"):
+with st.sidebar.expander(
+    "🔧 Debug"
+):
 
     st.write(
         "AgentForge User ID:",
-        user_id
+        user_id,
     )
 
     st.write(
         "AgentForge Email:",
-        user_email
+        user_email,
     )
 
     st.write(
         "Gmail Connected:",
-        gmail_connected
+        gmail_connected,
     )
 
     st.write(
         "Gmail Email:",
-        gmail_email
+        gmail_email,
     )
 
 
@@ -258,7 +385,8 @@ else:
 
     st.warning(
         "📧 Gmail is not connected. "
-        "Connect Gmail from the sidebar."
+        "Connect Gmail from the sidebar to allow "
+        "the agent to send emails."
     )
 
 
@@ -271,11 +399,15 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
+# ============================================================
+# DISPLAY CHAT HISTORY
+# ============================================================
+
 for message in st.session_state.messages:
 
     if isinstance(
         message,
-        HumanMessage
+        HumanMessage,
     ):
 
         with st.chat_message("user"):
@@ -284,9 +416,10 @@ for message in st.session_state.messages:
                 message.content
             )
 
+
     elif isinstance(
         message,
-        AIMessage
+        AIMessage,
     ):
 
         with st.chat_message("assistant"):
@@ -305,7 +438,15 @@ prompt = st.chat_input(
 )
 
 
+# ============================================================
+# PROCESS USER MESSAGE
+# ============================================================
+
 if prompt:
+
+    # ========================================================
+    # USER MESSAGE
+    # ========================================================
 
     human_message = HumanMessage(
         content=prompt
@@ -340,20 +481,21 @@ if prompt:
 
 
             # =================================================
-            # EXTRACT RESPONSE
+            # EXTRACT FINAL RESPONSE
             # =================================================
 
             if isinstance(
                 response,
-                dict
+                dict,
             ):
 
                 response_messages = (
                     response.get(
                         "messages",
-                        []
+                        [],
                     )
                 )
+
 
                 if response_messages:
 
@@ -361,9 +503,10 @@ if prompt:
                         response_messages[-1]
                     )
 
+
                     if hasattr(
                         final_message,
-                        "content"
+                        "content",
                     ):
 
                         answer = (
@@ -389,10 +532,18 @@ if prompt:
                 )
 
 
+            # =================================================
+            # DISPLAY RESPONSE
+            # =================================================
+
             st.markdown(
                 answer
             )
 
+
+        # ====================================================
+        # SAVE RESPONSE
+        # ====================================================
 
         st.session_state.messages.append(
             AIMessage(
