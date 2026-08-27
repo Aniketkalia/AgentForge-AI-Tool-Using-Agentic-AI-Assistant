@@ -39,14 +39,13 @@ if not st.user.is_logged_in:
         "🔐 Login with Google",
         type="primary"
     ):
-
         st.login()
 
     st.stop()
 
 
 # ============================================================
-# CURRENT USER
+# CURRENT LOGGED-IN USER
 # ============================================================
 
 current_user = st.user.email
@@ -68,25 +67,41 @@ if not user_id:
 
 from gmail_auth import (
     connect_gmail,
-    handle_gmail_callback
+    handle_gmail_callback,
+    get_current_gmail_service
 )
 
 
-# ------------------------------------------------------------
-# IMPORTANT:
-# Gmail callback comes back to "/" instead of "/oauth2callback"
-# so Streamlit's own OAuth callback does not conflict with it.
-# ------------------------------------------------------------
+# ============================================================
+# INITIALIZE GMAIL SESSION STATE
+# ============================================================
 
-if "code" in st.query_params:
+if "gmail_tokens" not in st.session_state:
+
+    st.session_state["gmail_tokens"] = {}
+
+
+if "gmail_connected" not in st.session_state:
+
+    st.session_state["gmail_connected"] = (
+        user_id in st.session_state["gmail_tokens"]
+    )
+
+
+# ============================================================
+# HANDLE GMAIL CALLBACK
+# ============================================================
+
+# IMPORTANT:
+# Only handle OAuth callback if WE started Gmail OAuth.
+if (
+    st.session_state.get("gmail_oauth_in_progress")
+    and "code" in st.query_params
+):
 
     gmail_success = handle_gmail_callback()
 
     if gmail_success:
-
-        st.success(
-            "✅ Gmail connected successfully!"
-        )
 
         st.rerun()
 
@@ -94,25 +109,19 @@ if "code" in st.query_params:
 
 
 # ============================================================
-# GMAIL TOKEN STORAGE
+# CHECK CURRENT USER GMAIL CONNECTION
 # ============================================================
 
-if "gmail_tokens" not in st.session_state:
-
-    st.session_state[
-        "gmail_tokens"
-    ] = {}
-
-
-gmail_tokens = st.session_state[
-    "gmail_tokens"
-]
-
+gmail_tokens = st.session_state.get(
+    "gmail_tokens",
+    {}
+)
 
 gmail_connected = (
-    user_id
-    in gmail_tokens
+    user_id in gmail_tokens
 )
+
+st.session_state["gmail_connected"] = gmail_connected
 
 
 # ============================================================
@@ -136,16 +145,13 @@ def generate_thread_id():
 
 def add_thread(thread_id):
 
-    if (
-        thread_id
-        not in st.session_state[
-            "chat_threads"
-        ]
-    ):
+    if "chat_threads" not in st.session_state:
 
-        st.session_state[
-            "chat_threads"
-        ].append(
+        st.session_state["chat_threads"] = []
+
+    if thread_id not in st.session_state["chat_threads"]:
+
+        st.session_state["chat_threads"].append(
             thread_id
         )
 
@@ -154,37 +160,31 @@ def initialize_session_state():
 
     if "message_history" not in st.session_state:
 
-        st.session_state[
-            "message_history"
-        ] = []
+        st.session_state["message_history"] = []
 
 
     if "thread_id" not in st.session_state:
 
-        st.session_state[
-            "thread_id"
-        ] = generate_thread_id()
+        st.session_state["thread_id"] = (
+            generate_thread_id()
+        )
 
 
     if "chat_threads" not in st.session_state:
 
         try:
 
-            st.session_state[
-                "chat_threads"
-            ] = retrieve()
+            st.session_state["chat_threads"] = (
+                retrieve()
+            )
 
         except Exception:
 
-            st.session_state[
-                "chat_threads"
-            ] = []
+            st.session_state["chat_threads"] = []
 
 
     add_thread(
-        st.session_state[
-            "thread_id"
-        ]
+        st.session_state["thread_id"]
     )
 
 
@@ -192,13 +192,9 @@ def reset_chat():
 
     thread_id = generate_thread_id()
 
-    st.session_state[
-        "thread_id"
-    ] = thread_id
+    st.session_state["thread_id"] = thread_id
 
-    st.session_state[
-        "message_history"
-    ] = []
+    st.session_state["message_history"] = []
 
     add_thread(thread_id)
 
@@ -231,9 +227,7 @@ def load_conversation(thread_id):
 
 def switch_conversation(thread_id):
 
-    st.session_state[
-        "thread_id"
-    ] = thread_id
+    st.session_state["thread_id"] = thread_id
 
     messages = load_conversation(
         thread_id
@@ -301,8 +295,9 @@ with st.sidebar:
 
     st.divider()
 
+
     # --------------------------------------------------------
-    # USER
+    # CURRENT USER
     # --------------------------------------------------------
 
     st.success(
@@ -310,6 +305,7 @@ with st.sidebar:
     )
 
     st.divider()
+
 
     # --------------------------------------------------------
     # GMAIL
@@ -337,8 +333,7 @@ with st.sidebar:
         )
 
         st.caption(
-            "Connect your Gmail before "
-            "sending emails."
+            "Connect your Gmail before sending emails."
         )
 
         if st.button(
@@ -348,19 +343,24 @@ with st.sidebar:
 
             gmail_url = connect_gmail()
 
-            st.markdown(
-                f"""
-                <meta
-                    http-equiv="refresh"
-                    content="0;url={gmail_url}"
-                />
-                """,
-                unsafe_allow_html=True
-            )
+            if gmail_url:
 
-            st.stop()
+                # Direct browser redirect.
+                st.markdown(
+                    f"""
+                    <meta
+                        http-equiv="refresh"
+                        content="0; url={gmail_url}"
+                    >
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                st.stop()
+
 
     st.divider()
+
 
     # --------------------------------------------------------
     # NEW CHAT
@@ -375,7 +375,9 @@ with st.sidebar:
 
         st.rerun()
 
+
     st.divider()
+
 
     # --------------------------------------------------------
     # CONVERSATIONS
@@ -433,7 +435,9 @@ with st.sidebar:
 
                 st.rerun()
 
+
     st.divider()
+
 
     # --------------------------------------------------------
     # LOGOUT
@@ -520,6 +524,7 @@ if not st.session_state[
 
     col1, col2, col3 = st.columns(3)
 
+
     with col1:
 
         st.markdown(
@@ -530,6 +535,7 @@ if not st.session_state[
 """
         )
 
+
     with col2:
 
         st.markdown(
@@ -539,6 +545,7 @@ if not st.session_state[
 `What is the latest AAPL price?`
 """
         )
+
 
     with col3:
 
@@ -575,6 +582,7 @@ if user_input:
         }
     )
 
+
     with st.chat_message("user"):
 
         st.markdown(
@@ -583,12 +591,16 @@ if user_input:
 
 
     config = {
+
         "configurable": {
+
             "thread_id":
                 st.session_state[
                     "thread_id"
                 ]
+
         }
+
     }
 
 
@@ -616,6 +628,7 @@ if user_input:
                 config=config,
 
                 stream_mode="messages"
+
             ):
 
                 if isinstance(
@@ -637,6 +650,7 @@ if user_input:
                         response_container.markdown(
                             full_response
                         )
+
 
         except Exception as e:
 
