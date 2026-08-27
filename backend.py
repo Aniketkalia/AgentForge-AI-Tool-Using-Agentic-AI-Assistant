@@ -65,48 +65,55 @@ model = ChatGroq(
 # GMAIL SERVICE
 # ============================================================
 
+# ============================================================
+# GMAIL SERVICE — CURRENT LOGGED-IN USER
+# ============================================================
+
 def get_gmail_service():
 
     try:
+        # Make sure user is logged in
+        if not st.user.is_logged_in:
+            raise Exception("Please login with Google first.")
 
-        # ----------------------------------------------------
-        # Read Gmail OAuth token from Streamlit Secrets
-        # ----------------------------------------------------
+        # Unique Google user ID
+        user_id = st.user.get("sub")
 
-        if "gmail" not in st.secrets:
+        if not user_id:
+            raise Exception("Unable to identify the logged-in user.")
+
+        # Get Gmail token for THIS user
+        gmail_tokens = st.session_state.get("gmail_tokens", {})
+
+        token_data = gmail_tokens.get(user_id)
+
+        if not token_data:
             raise Exception(
-                "Gmail credentials are not configured in Streamlit Secrets."
+                "Gmail is not connected for this account. "
+                "Please connect your Gmail first."
             )
-
-        token_data = json.loads(
-            st.secrets["gmail"]["token"]
-        )
 
         creds = Credentials.from_authorized_user_info(
             token_data,
             SCOPES
         )
 
-        # ----------------------------------------------------
-        # Refresh expired access token
-        # ----------------------------------------------------
-
+        # Refresh expired token
         if creds.expired and creds.refresh_token:
-
             creds.refresh(Request())
 
-        # ----------------------------------------------------
-        # Check credentials
-        # ----------------------------------------------------
+            # Save updated token
+            gmail_tokens[user_id] = json.loads(
+                creds.to_json()
+            )
+
+            st.session_state["gmail_tokens"] = gmail_tokens
 
         if not creds.valid:
             raise Exception(
-                "Gmail credentials are invalid or expired."
+                "Gmail credentials are invalid or expired. "
+                "Please reconnect Gmail."
             )
-
-        # ----------------------------------------------------
-        # Build Gmail API service
-        # ----------------------------------------------------
 
         service = build(
             "gmail",
@@ -118,7 +125,6 @@ def get_gmail_service():
         return service
 
     except Exception as e:
-
         raise Exception(
             f"Gmail authentication error: {str(e)}"
         )
@@ -135,10 +141,7 @@ def send_email(
     body: str
 ) -> str:
     """
-    Send an email using Gmail.
-
-    Use this tool when the user explicitly asks
-    to send an email.
+    Send an email using the currently logged-in user's Gmail.
     """
 
     try:
@@ -171,7 +174,8 @@ def send_email(
         )
 
         return (
-            f"Email sent successfully. "
+            f"Email sent successfully from "
+            f"{st.user.email}. "
             f"Message ID: {response['id']}"
         )
 
