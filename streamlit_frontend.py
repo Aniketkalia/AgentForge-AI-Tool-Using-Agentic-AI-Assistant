@@ -49,7 +49,6 @@ if not st.user.is_logged_in:
 # ============================================================
 
 current_user = st.user.email
-
 user_id = st.user.get("sub")
 
 if not user_id:
@@ -73,7 +72,7 @@ from gmail_auth import (
 
 
 # ============================================================
-# INITIALIZE GMAIL SESSION STATE
+# INITIALIZE USER-SPECIFIC GMAIL STATE
 # ============================================================
 
 if "gmail_tokens" not in st.session_state:
@@ -81,27 +80,52 @@ if "gmail_tokens" not in st.session_state:
     st.session_state["gmail_tokens"] = {}
 
 
-if "gmail_connected" not in st.session_state:
+if "gmail_emails" not in st.session_state:
 
-    st.session_state["gmail_connected"] = (
-        user_id in st.session_state["gmail_tokens"]
-    )
+    st.session_state["gmail_emails"] = {}
 
 
 # ============================================================
 # HANDLE GMAIL CALLBACK
 # ============================================================
+#
+# Gmail OAuth should redirect to:
+#
+# https://YOUR-APP.streamlit.app/
+#
+# with:
+#
+# ?code=...
+# &state=...
+#
+# This is NOT the Streamlit login callback.
+#
+# Streamlit login uses:
+#
+# /oauth2callback
+#
+# ============================================================
 
-# IMPORTANT:
-# Only handle OAuth callback if WE started Gmail OAuth.
 if (
-    st.session_state.get("gmail_oauth_in_progress")
+    st.session_state.get(
+        "gmail_oauth_in_progress",
+        False
+    )
     and "code" in st.query_params
 ):
 
     gmail_success = handle_gmail_callback()
 
+    # OAuth callback has completed.
+    st.session_state[
+        "gmail_oauth_in_progress"
+    ] = False
+
     if gmail_success:
+
+        st.session_state[
+            "gmail_connected"
+        ] = True
 
         st.rerun()
 
@@ -109,7 +133,7 @@ if (
 
 
 # ============================================================
-# CHECK CURRENT USER GMAIL CONNECTION
+# CURRENT USER GMAIL STATUS
 # ============================================================
 
 gmail_tokens = st.session_state.get(
@@ -117,11 +141,37 @@ gmail_tokens = st.session_state.get(
     {}
 )
 
+
+gmail_emails = st.session_state.get(
+    "gmail_emails",
+    {}
+)
+
+
+# IMPORTANT:
+# Check Gmail connection using CURRENT USER ID.
+#
+# This prevents User A's Gmail connection from appearing
+# connected for User B.
+
 gmail_connected = (
     user_id in gmail_tokens
 )
 
-st.session_state["gmail_connected"] = gmail_connected
+
+gmail_email = gmail_emails.get(
+    user_id
+)
+
+
+# Keep compatibility with existing code.
+st.session_state[
+    "gmail_connected"
+] = gmail_connected
+
+st.session_state[
+    "gmail_email"
+] = gmail_email
 
 
 # ============================================================
@@ -135,23 +185,31 @@ from backend import (
 
 
 # ============================================================
-# SESSION STATE
+# SESSION STATE FUNCTIONS
 # ============================================================
 
 def generate_thread_id():
 
-    return str(uuid.uuid4())
+    return str(
+        uuid.uuid4()
+    )
 
 
 def add_thread(thread_id):
 
     if "chat_threads" not in st.session_state:
 
-        st.session_state["chat_threads"] = []
+        st.session_state[
+            "chat_threads"
+        ] = []
 
-    if thread_id not in st.session_state["chat_threads"]:
+    if thread_id not in st.session_state[
+        "chat_threads"
+    ]:
 
-        st.session_state["chat_threads"].append(
+        st.session_state[
+            "chat_threads"
+        ].append(
             thread_id
         )
 
@@ -160,31 +218,37 @@ def initialize_session_state():
 
     if "message_history" not in st.session_state:
 
-        st.session_state["message_history"] = []
+        st.session_state[
+            "message_history"
+        ] = []
 
 
     if "thread_id" not in st.session_state:
 
-        st.session_state["thread_id"] = (
-            generate_thread_id()
-        )
+        st.session_state[
+            "thread_id"
+        ] = generate_thread_id()
 
 
     if "chat_threads" not in st.session_state:
 
         try:
 
-            st.session_state["chat_threads"] = (
-                retrieve()
-            )
+            st.session_state[
+                "chat_threads"
+            ] = retrieve()
 
         except Exception:
 
-            st.session_state["chat_threads"] = []
+            st.session_state[
+                "chat_threads"
+            ] = []
 
 
     add_thread(
-        st.session_state["thread_id"]
+        st.session_state[
+            "thread_id"
+        ]
     )
 
 
@@ -192,11 +256,17 @@ def reset_chat():
 
     thread_id = generate_thread_id()
 
-    st.session_state["thread_id"] = thread_id
+    st.session_state[
+        "thread_id"
+    ] = thread_id
 
-    st.session_state["message_history"] = []
+    st.session_state[
+        "message_history"
+    ] = []
 
-    add_thread(thread_id)
+    add_thread(
+        thread_id
+    )
 
 
 def load_conversation(thread_id):
@@ -227,7 +297,9 @@ def load_conversation(thread_id):
 
 def switch_conversation(thread_id):
 
-    st.session_state["thread_id"] = thread_id
+    st.session_state[
+        "thread_id"
+    ] = thread_id
 
     messages = load_conversation(
         thread_id
@@ -255,6 +327,7 @@ def switch_conversation(thread_id):
 
             continue
 
+
         content = message.content
 
         if (
@@ -268,6 +341,7 @@ def switch_conversation(thread_id):
                     "content": content
                 }
             )
+
 
     st.session_state[
         "message_history"
@@ -287,7 +361,9 @@ initialize_session_state()
 
 with st.sidebar:
 
-    st.title("🤖 AI Assistant")
+    st.title(
+        "🤖 AI Assistant"
+    )
 
     st.caption(
         "LangGraph • Groq • Gmail • Web Search • Tools"
@@ -296,9 +372,9 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # CURRENT USER
-    # --------------------------------------------------------
+    # ========================================================
 
     st.success(
         f"👤 {current_user}"
@@ -307,9 +383,9 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # GMAIL
-    # --------------------------------------------------------
+    # ========================================================
 
     if gmail_connected:
 
@@ -317,14 +393,18 @@ with st.sidebar:
             "📧 Gmail Connected"
         )
 
-        gmail_email = st.session_state.get(
-            "gmail_email",
-            current_user
-        )
+        if gmail_email:
 
-        st.caption(
-            f"Sending as: {gmail_email}"
-        )
+            st.caption(
+                f"Sending as: {gmail_email}"
+            )
+
+        else:
+
+            st.caption(
+                f"Sending as: {current_user}"
+            )
+
 
     else:
 
@@ -341,30 +421,43 @@ with st.sidebar:
             use_container_width=True
         ):
 
-            gmail_url = connect_gmail()
+            try:
 
-            if gmail_url:
+                gmail_url = connect_gmail()
 
-                # Direct browser redirect.
-                st.markdown(
-                    f"""
-                    <meta
-                        http-equiv="refresh"
-                        content="0; url={gmail_url}"
-                    >
-                    """,
-                    unsafe_allow_html=True
+                if gmail_url:
+
+                    # Mark OAuth as active BEFORE
+                    # redirecting to Google.
+                    st.session_state[
+                        "gmail_oauth_in_progress"
+                    ] = True
+
+                    # Direct browser redirect.
+                    st.markdown(
+                        f"""
+                        <script>
+                            window.top.location.href = "{gmail_url}";
+                        </script>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    st.stop()
+
+            except Exception as e:
+
+                st.error(
+                    f"Gmail connection error: {e}"
                 )
-
-                st.stop()
 
 
     st.divider()
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # NEW CHAT
-    # --------------------------------------------------------
+    # ========================================================
 
     if st.button(
         "➕ New Chat",
@@ -379,9 +472,9 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # CONVERSATIONS
-    # --------------------------------------------------------
+    # ========================================================
 
     st.subheader(
         "💬 Conversations"
@@ -390,6 +483,7 @@ with st.sidebar:
     threads = st.session_state[
         "chat_threads"
     ]
+
 
     if not threads:
 
@@ -407,6 +501,7 @@ with st.sidebar:
                 thread_id
             )[:8]
 
+
             is_current = (
                 str(thread_id)
                 ==
@@ -417,11 +512,13 @@ with st.sidebar:
                 )
             )
 
+
             button_label = (
                 f"🟢 {display_id}"
                 if is_current
                 else f"💬 {display_id}"
             )
+
 
             if st.button(
                 button_label,
@@ -439,16 +536,33 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # LOGOUT
-    # --------------------------------------------------------
+    # ========================================================
 
     if st.button(
         "🚪 Logout",
         use_container_width=True
     ):
 
+        # Clear only current session data.
+        st.session_state.pop(
+            "gmail_oauth_in_progress",
+            None
+        )
+
+        st.session_state.pop(
+            "gmail_connected",
+            None
+        )
+
+        st.session_state.pop(
+            "gmail_email",
+            None
+        )
+
         st.logout()
+
 
     st.caption(
         "Powered by LangGraph + Groq"
@@ -573,6 +687,10 @@ user_input = st.chat_input(
 
 if user_input:
 
+    # --------------------------------------------------------
+    # USER MESSAGE
+    # --------------------------------------------------------
+
     st.session_state[
         "message_history"
     ].append(
@@ -590,6 +708,10 @@ if user_input:
         )
 
 
+    # --------------------------------------------------------
+    # CONFIG
+    # --------------------------------------------------------
+
     config = {
 
         "configurable": {
@@ -604,11 +726,16 @@ if user_input:
     }
 
 
+    # --------------------------------------------------------
+    # RUN AGENT
+    # --------------------------------------------------------
+
     with st.chat_message("assistant"):
 
         response_container = st.empty()
 
         full_response = ""
+
 
         try:
 
@@ -640,12 +767,15 @@ if user_input:
                         message_chunk.content
                     )
 
+
                     if isinstance(
                         content,
                         str
                     ):
 
-                        full_response += content
+                        full_response += (
+                            content
+                        )
 
                         response_container.markdown(
                             full_response
@@ -663,6 +793,10 @@ if user_input:
             )
 
 
+    # --------------------------------------------------------
+    # SAVE ASSISTANT MESSAGE
+    # --------------------------------------------------------
+
     if full_response:
 
         st.session_state[
@@ -673,5 +807,6 @@ if user_input:
                 "content": full_response
             }
         )
+
 
     st.rerun()
