@@ -11,6 +11,9 @@ GMAIL_SCOPES = [
 
 
 def get_gmail_flow():
+    """
+    Creates a Gmail OAuth flow using the SEPARATE Gmail OAuth client.
+    """
 
     config = {
         "web": {
@@ -23,17 +26,24 @@ def get_gmail_flow():
 
     flow = Flow.from_client_config(
         config,
-        scopes=GMAIL_SCOPES
+        scopes=GMAIL_SCOPES,
     )
 
-    flow.redirect_uri = st.secrets[
-        "gmail_oauth"
-    ]["redirect_uri"]
+    flow.redirect_uri = st.secrets["gmail_oauth"]["redirect_uri"]
 
     return flow
 
 
 def connect_gmail():
+    """
+    Start Gmail OAuth for the currently logged-in Streamlit user.
+    """
+
+    if not st.user.is_logged_in:
+        st.error("Please login first.")
+        return None
+
+    current_user = st.user.email
 
     flow = get_gmail_flow()
 
@@ -41,15 +51,26 @@ def connect_gmail():
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
-        login_hint=st.user.email
+        login_hint=current_user,
     )
 
+    # Save OAuth state for this browser session.
     st.session_state["gmail_oauth_state"] = state
+    st.session_state["gmail_oauth_in_progress"] = True
 
     return authorization_url
 
 
 def handle_gmail_callback():
+    """
+    Handles the Gmail OAuth callback.
+
+    IMPORTANT:
+    This is only called when Gmail OAuth was explicitly started.
+    """
+
+    if not st.user.is_logged_in:
+        return False
 
     params = st.query_params
 
@@ -57,42 +78,58 @@ def handle_gmail_callback():
     state = params.get("state")
     error = params.get("error")
 
-    # No Gmail callback
+    # No OAuth response.
     if not code and not error:
         return False
 
-    # Google returned an error
+    # Only handle callbacks created by our Gmail connection button.
+    if not st.session_state.get("gmail_oauth_in_progress"):
+        return False
+
+    # Google returned an OAuth error.
     if error:
+        st.error(f"Gmail authorization failed: {error}")
 
-        st.error(
-            f"Gmail authorization failed: {error}"
-        )
-
-        st.query_params.clear()
-
-        return False
-
-    # Check OAuth state
-    saved_state = st.session_state.get(
-        "gmail_oauth_state"
-    )
-
-    if not saved_state:
-
-        st.error(
-            "Gmail OAuth session expired. "
-            "Please click Connect My Gmail again."
-        )
+        st.session_state.pop("gmail_oauth_state", None)
+        st.session_state.pop("gmail_oauth_in_progress", None)
 
         st.query_params.clear()
 
         return False
 
-    if state != saved_state:
+    # Missing authorization code.
+    if not code:
+        st.error("Gmail OAuth authorization code is missing.")
 
+        st.session_state.pop("gmail_oauth_state", None)
+        st.session_state.pop("gmail_oauth_in_progress", None)
+
+        st.query_params.clear()
+
+        return False
+
+    # Missing state.
+    if not state:
+        st.error("Gmail OAuth state is missing.")
+
+        st.session_state.pop("gmail_oauth_state", None)
+        st.session_state.pop("gmail_oauth_in_progress", None)
+
+        st.query_params.clear()
+
+        return False
+
+    saved_state = st.session_state.get("gmail_oauth_state")
+
+    # Protect against OAuth state mismatch.
+    if not saved_state or state != saved_state:
         st.error(
-            "Invalid Gmail OAuth state."
+            "Invalid Gmail OAuth state. "
+            "Please click 'Connect My Gmail' again."
         )
+
+        st.session_state.pop("gmail_oauth_state", None)
+        st.session_state.pop("gmail_oauth_in_progress", None)
 
         st.query_params.clear()
 
@@ -100,111 +137,90 @@ def handle_gmail_callback():
 
     try:
 
+        # Create a fresh OAuth flow.
         flow = get_gmail_flow()
 
-        flow.fetch_token(
-            code=code
-        )
+        # Complete OAuth.
+        flow.fetch_token(code=code)
 
         credentials = flow.credentials
 
-        # Build Gmail service using the OAuth
-        # credentials of THIS logged-in user.
+        # Build Gmail API service.
         service = build(
             "gmail",
             "v1",
             credentials=credentials,
-            cache_discovery=False
+            cache_discovery=False,
         )
 
-        # ------------------------------------------------------
-        # Find the Gmail account represented by these credentials
-        # ------------------------------------------------------
-
+        # Ask Gmail which account authorized the application.
         profile = (
             service.users()
-            .getProfile(
-                userId="me"
-            )
+            .getProfile(userId="me")
             .execute()
         )
 
         gmail_email = profile["emailAddress"]
 
-        logged_in_email = st.user.email
+        current_user = st.user.email
 
-        # ------------------------------------------------------
-        # SECURITY CHECK
-        # Gmail account MUST equal AgentForge login account
-        # ------------------------------------------------------
-
-        if (
-            gmail_email.lower()
-            !=
-            logged_in_email.lower()
-        ):
+        # VERY IMPORTANT:
+        # Gmail account must be the same account that logged
+        # into AgentForge.
+        if gmail_email.lower() != current_user.lower():
 
             st.error(
-                f"""
-❌ Gmail account mismatch.
-
-AgentForge login:
-{logged_in_email}
-
-Gmail account:
-{gmail_email}
-
-Please select the same Google account.
-"""
+                "Gmail account mismatch.\n\n"
+                f"AgentForge user: {current_user}\n\n"
+                f"Gmail account: {gmail_email}\n\n"
+                "Please connect the same Google/Gmail account."
             )
+
+            st.session_state.pop("gmail_oauth_state", None)
+            st.session_state.pop("gmail_oauth_in_progress", None)
 
             st.query_params.clear()
 
             return False
 
-        # ------------------------------------------------------
-        # Get current Google user's unique ID
-        # ------------------------------------------------------
-
+        # Google unique user ID.
         user_id = st.user.get("sub")
 
         if not user_id:
-
             st.error(
-                "Unable to identify Google user."
+                "Unable to identify the logged-in Google user."
             )
-
-            st.query_params.clear()
 
             return False
 
-        # ------------------------------------------------------
-        # Store Gmail credentials PER USER
-        # ------------------------------------------------------
+        # --------------------------------------------------------
+        # USER-SPECIFIC GMAIL TOKENS
+        # --------------------------------------------------------
 
         if "gmail_tokens" not in st.session_state:
+            st.session_state["gmail_tokens"] = {}
 
-            st.session_state[
-                "gmail_tokens"
-            ] = {}
-
-        st.session_state[
-            "gmail_tokens"
-        ][user_id] = json.loads(
-            credentials.to_json()
+        # Store this Gmail token ONLY under this logged-in user's ID.
+        st.session_state["gmail_tokens"][user_id] = (
+            json.loads(credentials.to_json())
         )
 
-        # Save connected email
-        st.session_state[
-            "gmail_email"
-        ] = gmail_email
+        # Store Gmail email for display.
+        st.session_state["gmail_email"] = gmail_email
 
-        st.session_state[
-            "gmail_connected"
-        ] = True
+        # Mark Gmail connected.
+        st.session_state["gmail_connected"] = True
 
-        # Remove OAuth parameters
+        # Cleanup OAuth state.
+        st.session_state.pop("gmail_oauth_state", None)
+        st.session_state.pop("gmail_oauth_in_progress", None)
+
+        # Remove ?code=...&state=... from browser.
         st.query_params.clear()
+
+        st.success(
+            f"✅ Gmail connected successfully: {gmail_email}"
+        )
 
         return True
 
@@ -214,6 +230,61 @@ Please select the same Google account.
             f"Gmail connection failed: {e}"
         )
 
+        st.session_state.pop("gmail_oauth_state", None)
+        st.session_state.pop("gmail_oauth_in_progress", None)
+
         st.query_params.clear()
 
         return False
+
+
+def get_current_gmail_credentials():
+    """
+    Return Gmail credentials belonging to the CURRENT
+    logged-in AgentForge user.
+    """
+
+    if not st.user.is_logged_in:
+        return None
+
+    user_id = st.user.get("sub")
+
+    if not user_id:
+        return None
+
+    gmail_tokens = st.session_state.get(
+        "gmail_tokens",
+        {}
+    )
+
+    token_data = gmail_tokens.get(user_id)
+
+    if not token_data:
+        return None
+
+    from google.oauth2.credentials import Credentials
+
+    credentials = Credentials.from_authorized_user_info(
+        token_data,
+        GMAIL_SCOPES,
+    )
+
+    return credentials
+
+
+def get_current_gmail_service():
+    """
+    Return Gmail API service for the CURRENT user.
+    """
+
+    credentials = get_current_gmail_credentials()
+
+    if credentials is None:
+        return None
+
+    return build(
+        "gmail",
+        "v1",
+        credentials=credentials,
+        cache_discovery=False,
+    )
