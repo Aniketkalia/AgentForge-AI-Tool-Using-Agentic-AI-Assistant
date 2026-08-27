@@ -6,6 +6,7 @@ langchain-groq
 langgraph
 langgraph-checkpoint-sqlite
 duckduckgo-search
+ddgs
 python-dotenv
 requests
 google-auth
