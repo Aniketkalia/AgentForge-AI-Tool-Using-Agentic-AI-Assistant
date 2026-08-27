@@ -1,12 +1,13 @@
 streamlit
+langchain
 langchain-core
-langchain-groq
 langchain-community
+langchain-groq
 langgraph
 langgraph-checkpoint-sqlite
+duckduckgo-search
+python-dotenv
+requests
 google-auth
 google-auth-oauthlib
 google-api-python-client
-python-dotenv
-requests
-duckduckgo-search
