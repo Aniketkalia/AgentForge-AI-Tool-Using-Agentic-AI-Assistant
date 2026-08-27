@@ -3,7 +3,7 @@ import uuid
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
 
-from streamlit_frontend import chatbot, retrieve
+from backend import chatbot, retrieve
 
 
 # ============================================================
