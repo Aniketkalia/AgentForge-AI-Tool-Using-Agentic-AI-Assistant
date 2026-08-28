@@ -95,12 +95,21 @@ if "code" in st.query_params:
         st.stop()
 
 
-# ============================================================
+## ============================================================
 # LANGGRAPH THREAD
 # ============================================================
 
 thread_id = f"agentforge-user-{user_id}"
-config = {"configurable": {"thread_id": thread_id}}
+
+# UPDATE: Pass the Gmail tokens and email directly into LangGraph's config
+config = {
+    "configurable": {
+        "thread_id": thread_id,
+        "gmail_access_token": st.session_state.get("gmail_access_token"),
+        "gmail_refresh_token": st.session_state.get("gmail_refresh_token"),
+        "user_email": user_email,
+    }
+}
 
 gmail_email = None
 gmail_connected = False
@@ -114,7 +123,6 @@ except Exception as e:
 
 st.session_state.gmail_connected = gmail_connected
 st.session_state.gmail_email = gmail_email
-
 
 # ============================================================
 # SIDEBAR
