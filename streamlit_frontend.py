@@ -1,13 +1,6 @@
 # ============================================================
 # streamlit_frontend.py
 # AgentForge AI
-#
-# Google Login
-# Gmail OAuth
-# LangGraph
-# Groq
-# Web Search
-# Tools
 # ============================================================
 
 import html
@@ -39,7 +32,6 @@ st.set_page_config(
     page_title="AgentForge AI",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
 
@@ -47,54 +39,38 @@ st.set_page_config(
 # SESSION STATE
 # ============================================================
 
-def initialize_session_state():
+if "gmail_auth_url" not in st.session_state:
+    st.session_state.gmail_auth_url = None
 
-    if "gmail_connected" not in st.session_state:
-        st.session_state[
-            "gmail_connected"
-        ] = False
+if "gmail_connected" not in st.session_state:
+    st.session_state.gmail_connected = False
 
-    if "gmail_email" not in st.session_state:
-        st.session_state[
-            "gmail_email"
-        ] = None
+if "gmail_email" not in st.session_state:
+    st.session_state.gmail_email = None
 
-    if "gmail_auth_url" not in st.session_state:
-        st.session_state[
-            "gmail_auth_url"
-        ] = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    if "message_history" not in st.session_state:
-        st.session_state[
-            "message_history"
-        ] = []
-
-    if "thread_id" not in st.session_state:
-        st.session_state[
-            "thread_id"
-        ] = str(uuid.uuid4())
-
-
-initialize_session_state()
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(
+        uuid.uuid4()
+    )
 
 
 # ============================================================
-# GMAIL OAUTH CALLBACK
+# GMAIL CALLBACK
 # ============================================================
-
+#
 # Google redirects to:
 #
-# https://your-app.streamlit.app/
-#       ?code=XXXX
-#       &state=XXXX
+# https://YOUR-APP.streamlit.app/
+#       ?code=...
+#       &state=...
 #
-# Process Gmail callback BEFORE normal UI.
+# Process callback BEFORE normal Gmail UI.
+# ============================================================
 
-if (
-    "code" in st.query_params
-    or
-    "error" in st.query_params
-):
+if "code" in st.query_params:
 
     try:
 
@@ -102,31 +78,19 @@ if (
 
         if success:
 
-            # Get connected Gmail account.
-            try:
-                email = (
-                    get_connected_gmail_email()
-                )
+            # Get connected account
+            email = get_connected_gmail_email()
 
-                st.session_state[
-                    "gmail_email"
-                ] = email
+            st.session_state.gmail_email = email
+            st.session_state.gmail_connected = bool(
+                email
+            )
 
-                st.session_state[
-                    "gmail_connected"
-                ] = bool(email)
-
-            except Exception:
-                pass
-
-            # Remove OAuth parameters.
+            # Remove OAuth parameters
             st.query_params.clear()
 
-            # Reload application.
+            # Refresh application
             st.rerun()
-
-        else:
-            st.query_params.clear()
 
     except Exception as e:
 
@@ -163,7 +127,6 @@ if not st.user.is_logged_in:
         use_container_width=True,
         type="primary",
     ):
-
         st.login()
 
     st.stop()
@@ -176,12 +139,10 @@ if not st.user.is_logged_in:
 user_email = st.user.email
 user_id = st.user.get("sub")
 
-
 if not user_id:
 
     st.error(
-        "❌ Unable to identify the logged-in "
-        "Google user."
+        "❌ Unable to identify logged-in Google user."
     )
 
     st.stop()
@@ -191,20 +152,10 @@ if not user_id:
 # LANGGRAPH THREAD
 # ============================================================
 
-if "thread_id" not in st.session_state:
+thread_id = (
+    f"agentforge-user-{user_id}"
+)
 
-    st.session_state[
-        "thread_id"
-    ] = str(uuid.uuid4())
-
-
-thread_id = st.session_state[
-    "thread_id"
-]
-
-
-# IMPORTANT:
-# LangGraph checkpoint requires thread_id.
 
 config = {
     "configurable": {
@@ -214,40 +165,36 @@ config = {
 
 
 # ============================================================
-# CHECK GMAIL CONNECTION
+# LOAD GMAIL STATUS
 # ============================================================
+
+gmail_email = None
+gmail_connected = False
+gmail_error = None
 
 try:
 
-    gmail_connected = (
-        is_gmail_connected()
+    gmail_email = (
+        get_connected_gmail_email()
     )
 
-    if gmail_connected:
+    gmail_connected = (
+        gmail_email is not None
+        and gmail_email != ""
+    )
 
-        gmail_email = (
-            get_connected_gmail_email()
-        )
+except Exception as e:
 
-    else:
-
-        gmail_email = None
-
-except Exception:
-
-    gmail_connected = False
-    gmail_email = None
+    gmail_error = str(e)
 
 
-# Synchronize UI state.
+st.session_state.gmail_connected = (
+    gmail_connected
+)
 
-st.session_state[
-    "gmail_connected"
-] = gmail_connected
-
-st.session_state[
-    "gmail_email"
-] = gmail_email
+st.session_state.gmail_email = (
+    gmail_email
+)
 
 
 # ============================================================
@@ -259,14 +206,13 @@ with st.sidebar:
     st.title("🤖 AgentForge")
 
     st.caption(
-        "LangGraph • Groq • Gmail • "
-        "Web Search • Tools"
+        "LangGraph • Groq • Gmail • Web Search • Tools"
     )
 
     st.divider()
 
     # --------------------------------------------------------
-    # CURRENT USER
+    # USER
     # --------------------------------------------------------
 
     st.success(
@@ -281,6 +227,10 @@ with st.sidebar:
 
     st.subheader("📧 Gmail")
 
+    # ========================================================
+    # CONNECTED
+    # ========================================================
+
     if gmail_connected:
 
         st.success(
@@ -288,31 +238,62 @@ with st.sidebar:
         )
 
         st.markdown(
-            f"**Connected account:**\n\n"
+            f"**Connected account:**  \n"
             f"{gmail_email}"
         )
 
         st.caption(
-            "AgentForge can send emails "
-            "using this Gmail account."
+            "AgentForge can send emails using this Gmail account."
         )
 
-        # ----------------------------------------------------
-        # DISCONNECT
-        # ----------------------------------------------------
+        st.divider()
 
+        # Refresh
+        if st.button(
+            "🔄 Refresh Gmail",
+            use_container_width=True,
+        ):
+            st.rerun()
+
+        # Disconnect
         if st.button(
             "🔌 Disconnect Gmail",
             use_container_width=True,
         ):
 
-            disconnect_gmail()
+            try:
 
-            st.session_state[
-                "gmail_auth_url"
-            ] = None
+                disconnect_gmail(
+                    user_id
+                )
 
-            st.rerun()
+                st.session_state.gmail_connected = (
+                    False
+                )
+
+                st.session_state.gmail_email = (
+                    None
+                )
+
+                st.session_state.gmail_auth_url = (
+                    None
+                )
+
+                st.success(
+                    "Gmail disconnected."
+                )
+
+                st.rerun()
+
+            except Exception as e:
+
+                st.error(
+                    f"Disconnect failed: {e}"
+                )
+
+    # ========================================================
+    # NOT CONNECTED
+    # ========================================================
 
     else:
 
@@ -321,12 +302,12 @@ with st.sidebar:
         )
 
         st.caption(
-            "Connect Gmail to allow "
-            "AgentForge to send emails."
+            "Connect your Gmail to allow AgentForge "
+            "to send emails."
         )
 
         # ----------------------------------------------------
-        # CREATE OAUTH URL
+        # CREATE AUTH URL
         # ----------------------------------------------------
 
         if st.button(
@@ -339,20 +320,19 @@ with st.sidebar:
 
                 auth_url = connect_gmail()
 
-                if not auth_url:
+                if auth_url:
 
-                    st.error(
-                        "❌ Unable to create "
-                        "Gmail authorization URL."
+                    st.session_state.gmail_auth_url = (
+                        auth_url
                     )
+
+                    st.rerun()
 
                 else:
 
-                    st.session_state[
-                        "gmail_auth_url"
-                    ] = auth_url
-
-                    st.rerun()
+                    st.error(
+                        "Unable to create Gmail authorization URL."
+                    )
 
             except Exception as e:
 
@@ -361,18 +341,18 @@ with st.sidebar:
                 )
 
         # ----------------------------------------------------
-        # NEW TAB LINK
+        # NEW TAB AUTHORIZATION
         # ----------------------------------------------------
 
-        auth_url = st.session_state.get(
-            "gmail_auth_url"
+        auth_url = (
+            st.session_state.gmail_auth_url
         )
 
         if auth_url:
 
             safe_url = html.escape(
                 auth_url,
-                quote=True,
+                quote=True
             )
 
             st.markdown(
@@ -384,18 +364,18 @@ with st.sidebar:
                     style="
                         display:block;
                         width:100%;
-                        padding:12px;
-                        margin-top:10px;
+                        padding:0.75rem 1rem;
                         background:#FF4B4B;
                         color:white;
                         text-align:center;
                         text-decoration:none;
-                        border-radius:8px;
+                        border-radius:0.5rem;
                         font-weight:600;
+                        margin-top:0.75rem;
+                        box-sizing:border-box;
                     "
                 >
-                    🔗 Open Google Gmail
-                    Authorization
+                    🔐 Continue with Google
                 </a>
                 """,
                 unsafe_allow_html=True,
@@ -405,70 +385,117 @@ with st.sidebar:
                 """
                 **Gmail connection**
 
-                1. Click **Open Google Gmail Authorization**.
-                2. Google opens in a new tab.
-                3. Select your Google account.
-                4. Click **Allow**.
-                5. Google redirects back to AgentForge.
-                6. Gmail will show as connected.
-
-                You can keep this AgentForge tab open.
+                1. Click **Continue with Google**
+                2. Google opens in a **new tab**
+                3. Select your Gmail account
+                4. Click **Allow**
+                5. Google redirects back to AgentForge
+                6. Return to the AgentForge tab
+                7. Click **🔄 Refresh Gmail**
                 """
             )
 
-    st.divider()
+            if st.button(
+                "❌ Cancel",
+                use_container_width=True,
+            ):
 
-    # --------------------------------------------------------
+                st.session_state.gmail_auth_url = (
+                    None
+                )
+
+                st.rerun()
+
+    # ========================================================
+    # ERROR
+    # ========================================================
+
+    if gmail_error:
+
+        st.error(
+            f"Gmail status error: {gmail_error}"
+        )
+
+    # ========================================================
     # NEW CHAT
-    # --------------------------------------------------------
+    # ========================================================
+
+    st.divider()
 
     if st.button(
         "🆕 New Chat",
         use_container_width=True,
     ):
 
-        st.session_state[
-            "thread_id"
-        ] = str(uuid.uuid4())
+        st.session_state.messages = []
 
-        st.session_state[
-            "message_history"
-        ] = []
+        st.session_state.thread_id = str(
+            uuid.uuid4()
+        )
 
         st.rerun()
 
-    st.divider()
+    # ========================================================
+    # DEBUG
+    # ========================================================
 
-    # --------------------------------------------------------
+    with st.expander("🔧 Debug"):
+
+        st.write(
+            "AgentForge User ID:",
+            user_id
+        )
+
+        st.write(
+            "AgentForge Email:",
+            user_email
+        )
+
+        st.write(
+            "Gmail Connected:",
+            gmail_connected
+        )
+
+        st.write(
+            "Gmail Account:",
+            gmail_email
+        )
+
+        st.write(
+            "LangGraph Thread:",
+            thread_id
+        )
+
+    # ========================================================
     # LOGOUT
-    # --------------------------------------------------------
+    # ========================================================
+
+    st.divider()
 
     if st.button(
         "🚪 Logout",
         use_container_width=True,
     ):
 
-        # Gmail credentials are cleared from
-        # the current session.
+        st.session_state.messages = []
 
-        disconnect_gmail()
+        st.session_state.gmail_auth_url = (
+            None
+        )
 
         st.logout()
 
 
 # ============================================================
-# MAIN HEADER
+# MAIN PAGE
 # ============================================================
 
-st.title("🤖 AgentForge AI")
+st.title(
+    "🤖 AgentForge AI"
+)
 
-st.markdown(
-    """
-### Tool-Using Agentic AI Assistant
-
-Ask questions, perform calculations, search the web,
-check stock prices, or send emails using natural language.
-"""
+st.caption(
+    f"Logged in as: {user_email}"
 )
 
 
@@ -479,7 +506,7 @@ check stock prices, or send emails using natural language.
 if gmail_connected:
 
     st.success(
-        f"📧 Gmail connected: **{gmail_email}**"
+        f"📧 Gmail connected: {gmail_email}"
     )
 
 else:
@@ -491,192 +518,204 @@ else:
 
 
 # ============================================================
-# CONVERSATION DETAILS
+# CHAT HISTORY
 # ============================================================
 
-with st.expander(
-    "💬 Conversation Details",
-    expanded=False,
-):
+for message in st.session_state.messages:
 
-    st.write(
-        f"**Thread ID:** "
-        f"`{thread_id}`"
-    )
+    if isinstance(
+        message,
+        HumanMessage
+    ):
 
-    st.write(
-        f"**Messages:** "
-        f"{len(st.session_state['message_history'])}"
-    )
+        with st.chat_message("user"):
+
+            st.markdown(
+                message.content
+            )
+
+    elif isinstance(
+        message,
+        AIMessage
+    ):
+
+        content = message.content
+
+        if (
+            isinstance(content, str)
+            and content.strip()
+        ):
+
+            with st.chat_message(
+                "assistant"
+            ):
+
+                st.markdown(
+                    content
+                )
 
 
 # ============================================================
-# DISPLAY CHAT HISTORY
+# EMPTY STATE
 # ============================================================
 
-for message in st.session_state[
-    "message_history"
-]:
+if not st.session_state.messages:
 
-    role = message.get(
-        "role",
-        "assistant",
+    st.info(
+        "👋 Welcome to AgentForge AI!"
     )
 
-    content = message.get(
-        "content",
-        "",
-    )
+    col1, col2, col3 = st.columns(3)
 
-    if not content:
-        continue
+    with col1:
 
-    with st.chat_message(role):
+        st.markdown(
+            """
+            **🧮 Calculator**
 
-        st.markdown(content)
+            `Calculate 125 * 48`
+            """
+        )
+
+    with col2:
+
+        st.markdown(
+            """
+            **📧 Gmail**
+
+            `Send an email to someone@example.com`
+            """
+        )
+
+    with col3:
+
+        st.markdown(
+            """
+            **🌐 Web Search**
+
+            `Search the latest AI news`
+            """
+        )
 
 
 # ============================================================
 # CHAT INPUT
 # ============================================================
 
-user_input = st.chat_input(
+prompt = st.chat_input(
     "Ask me anything..."
 )
 
 
 # ============================================================
-# CHAT PROCESSING
+# PROCESS MESSAGE
 # ============================================================
 
-if user_input:
+if prompt:
 
-    # --------------------------------------------------------
-    # DISPLAY USER MESSAGE
-    # --------------------------------------------------------
+    human_message = HumanMessage(
+        content=prompt
+    )
 
-    st.session_state[
-        "message_history"
-    ].append(
-        {
-            "role": "user",
-            "content": user_input,
-        }
+    st.session_state.messages.append(
+        human_message
     )
 
     with st.chat_message("user"):
 
         st.markdown(
-            user_input
+            prompt
         )
 
     # --------------------------------------------------------
-    # RUN AGENT
+    # AGENT
     # --------------------------------------------------------
 
-    with st.chat_message(
-        "assistant"
-    ):
+    try:
 
-        try:
+        with st.chat_message(
+            "assistant"
+        ):
 
-            response = chatbot.invoke(
-                {
-                    "messages": [
-                        HumanMessage(
-                            content=user_input
-                        )
-                    ]
-                },
-                config=config,
-            )
+            with st.spinner(
+                "🤖 AgentForge is thinking..."
+            ):
+
+                response = chatbot.invoke(
+                    {
+                        "messages": [
+                            human_message
+                        ]
+                    },
+                    config=config
+                )
 
             # ------------------------------------------------
-            # GET FINAL MESSAGE
+            # FIND ANSWER
             # ------------------------------------------------
 
-            ai_content = None
+            answer = ""
 
             if isinstance(
                 response,
-                dict,
+                dict
             ):
 
-                messages = response.get(
-                    "messages",
-                    [],
+                response_messages = (
+                    response.get(
+                        "messages",
+                        []
+                    )
                 )
 
-                if messages:
+                for msg in reversed(
+                    response_messages
+                ):
 
-                    for message in reversed(
-                        messages
+                    content = getattr(
+                        msg,
+                        "content",
+                        None
+                    )
+
+                    if (
+                        isinstance(
+                            content,
+                            str
+                        )
+                        and content.strip()
                     ):
 
-                        if isinstance(
-                            message,
-                            AIMessage,
-                        ):
+                        answer = content
 
-                            content = (
-                                message.content
-                            )
-
-                            if isinstance(
-                                content,
-                                str,
-                            ) and content.strip():
-
-                                ai_content = content
-
-                                break
+                        break
 
             # ------------------------------------------------
             # FALLBACK
             # ------------------------------------------------
 
-            if not ai_content:
+            if not answer:
 
-                ai_content = (
-                    "I couldn't generate a response."
+                answer = str(
+                    response
                 )
 
-            # ------------------------------------------------
-            # DISPLAY
-            # ------------------------------------------------
-
             st.markdown(
-                ai_content
+                answer
             )
 
-            # ------------------------------------------------
-            # SAVE
-            # ------------------------------------------------
+        # ----------------------------------------------------
+        # SAVE
+        # ----------------------------------------------------
 
-            st.session_state[
-                "message_history"
-            ].append(
-                {
-                    "role": "assistant",
-                    "content": ai_content,
-                }
+        st.session_state.messages.append(
+            AIMessage(
+                content=answer
             )
+        )
 
-        except Exception as e:
+    except Exception as e:
 
-            error_message = (
-                f"❌ Agent error: {e}"
-            )
-
-            st.error(
-                error_message
-            )
-
-            st.session_state[
-                "message_history"
-            ].append(
-                {
-                    "role": "assistant",
-                    "content": error_message,
-                }
-            )
+        st.error(
+            f"❌ Agent error: {e}"
+        )
