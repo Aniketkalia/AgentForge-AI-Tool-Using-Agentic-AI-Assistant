@@ -97,11 +97,16 @@ model = ChatGroq(
 # SEND EMAIL TOOL
 # ============================================================
 
+# ============================================================
+# SEND EMAIL TOOL
+# ============================================================
+
 @tool
 def send_email(
     to: str,
     subject: str,
     body: str,
+    config: RunnableConfig,
 ) -> str:
     """
     Send an email using the user's connected Gmail account.
@@ -109,10 +114,18 @@ def send_email(
 
     try:
         # ----------------------------------------------------
+        # EXTRACT TOKENS FROM LANGGRAPH CONFIG
+        # ----------------------------------------------------
+        access_token = config["configurable"].get("gmail_access_token")
+        refresh_token = config["configurable"].get("gmail_refresh_token")
+
+        # ----------------------------------------------------
         # GET GMAIL SERVICE FROM gmail_auth.py
         # ----------------------------------------------------
-
-        service = get_gmail_service()
+        service = get_gmail_service(
+            access_token=access_token,
+            refresh_token=refresh_token
+        )
 
         if service is None:
             return (
@@ -123,18 +136,14 @@ def send_email(
         # ----------------------------------------------------
         # CREATE EMAIL
         # ----------------------------------------------------
-
         message = EmailMessage()
-
         message["To"] = to
         message["Subject"] = subject
-
         message.set_content(body)
 
         # ----------------------------------------------------
         # ENCODE EMAIL
         # ----------------------------------------------------
-
         encoded_message = (
             base64.urlsafe_b64encode(
                 message.as_bytes()
@@ -149,7 +158,6 @@ def send_email(
         # ----------------------------------------------------
         # SEND THROUGH GMAIL API
         # ----------------------------------------------------
-
         response = (
             service.users()
             .messages()
@@ -168,14 +176,7 @@ def send_email(
         # ----------------------------------------------------
         # GET CONNECTED USER
         # ----------------------------------------------------
-
-        try:
-            if st.user.is_logged_in:
-                sender = st.user.email
-            else:
-                sender = "connected Gmail account"
-        except Exception:
-            sender = "connected Gmail account"
+        sender = config["configurable"].get("user_email", "connected Gmail account")
 
         return (
             "EMAIL_SENT: "
@@ -185,13 +186,10 @@ def send_email(
         )
 
     except Exception as e:
-
         return (
             "EMAIL_FAILED: "
             f"{str(e)}"
         )
-
-
 # ============================================================
 # WEB SEARCH
 # ============================================================
