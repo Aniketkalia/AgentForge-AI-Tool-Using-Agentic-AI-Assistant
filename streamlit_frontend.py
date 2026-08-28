@@ -26,22 +26,32 @@ st.set_page_config(
 
 
 # ============================================================
-# HANDLE GMAIL CALLBACK FIRST
+# GMAIL CALLBACK
 # ============================================================
 
 if "code" in st.query_params:
 
-    success = handle_gmail_callback()
+    try:
 
-    if success:
+        success = handle_gmail_callback()
 
-        # Force a clean rerun after saving token
-        st.rerun()
+        if success:
 
-    else:
+            st.session_state["gmail_connected"] = True
 
-        # If callback failed, stop here
-        st.stop()
+            st.success(
+                "✅ Gmail connected successfully!"
+            )
+
+            st.rerun()
+
+    except Exception as e:
+
+        st.error(
+            f"❌ Gmail callback error: {e}"
+        )
+
+        st.query_params.clear()
 
 
 # ============================================================
@@ -50,7 +60,9 @@ if "code" in st.query_params:
 
 if not st.user.is_logged_in:
 
-    st.title("🤖 AgentForge")
+    st.title(
+        "🤖 AgentForge"
+    )
 
     st.subheader(
         "Tool-Using Agentic AI Assistant"
@@ -80,45 +92,29 @@ user_id = st.user.get("sub")
 
 
 # ============================================================
-# LOAD GMAIL FROM SQLITE
+# CHECK GMAIL
 # ============================================================
+
+gmail_connected = False
+
+gmail_email = None
+
 
 try:
 
     gmail_connected = is_gmail_connected()
 
-    gmail_email = (
-        get_connected_gmail_email()
-    )
+    if gmail_connected:
+
+        gmail_email = (
+            get_connected_gmail_email()
+        )
 
 except Exception as e:
 
     gmail_connected = False
 
     gmail_email = None
-
-    st.sidebar.error(
-        "Unable to load Gmail connection."
-    )
-
-    with st.sidebar.expander(
-        "Database error"
-    ):
-
-        st.code(str(e))
-
-
-# ============================================================
-# SYNCHRONIZE SESSION CACHE
-# ============================================================
-
-st.session_state["gmail_connected"] = (
-    gmail_connected
-)
-
-st.session_state["gmail_email"] = (
-    gmail_email
-)
 
 
 # ============================================================
@@ -135,7 +131,7 @@ st.sidebar.success(
 
 
 # ============================================================
-# GMAIL SECTION
+# GMAIL
 # ============================================================
 
 st.sidebar.markdown("---")
@@ -157,43 +153,12 @@ if gmail_connected:
             gmail_email
         )
 
-    # --------------------------------------------------------
-    # DISCONNECT
-    # --------------------------------------------------------
-
-    if st.sidebar.button(
-        "🔌 Disconnect Gmail",
-        use_container_width=True,
-    ):
-
-        from gmail_auth import disconnect_gmail
-
-        disconnect_gmail(
-            user_id
-        )
-
-        st.session_state.pop(
-            "gmail_connected",
-            None
-        )
-
-        st.session_state.pop(
-            "gmail_email",
-            None
-        )
-
-        st.rerun()
-
-
 else:
 
     st.sidebar.info(
         "Gmail is not connected."
     )
 
-    # --------------------------------------------------------
-    # CONNECT
-    # --------------------------------------------------------
 
     if st.sidebar.button(
         "🔗 Connect My Gmail",
@@ -204,13 +169,13 @@ else:
 
             auth_url = connect_gmail()
 
+
             if auth_url:
 
-                # ------------------------------------------------
+                # IMPORTANT:
                 # Use browser navigation.
-                #
-                # This avoids iframe/new-tab problems.
-                # ------------------------------------------------
+                # Do NOT use window.open().
+                # Do NOT use /oauth2callback.
 
                 st.markdown(
                     f"""
@@ -224,16 +189,18 @@ else:
 
                 st.stop()
 
+
             else:
 
                 st.error(
                     "Unable to start Gmail authorization."
                 )
 
+
         except Exception as e:
 
             st.error(
-                f"Gmail authorization error: {e}"
+                f"❌ Gmail authorization error: {e}"
             )
 
 
@@ -242,6 +209,7 @@ else:
 # ============================================================
 
 st.sidebar.markdown("---")
+
 
 if st.sidebar.button(
     "🚪 Logout",
@@ -332,6 +300,10 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
+# ============================================================
+# DISPLAY CHAT
+# ============================================================
+
 for message in st.session_state.messages:
 
     if isinstance(
@@ -344,6 +316,7 @@ for message in st.session_state.messages:
             st.markdown(
                 message.content
             )
+
 
     elif isinstance(
         message,
@@ -376,9 +349,11 @@ if prompt:
         content=prompt
     )
 
+
     st.session_state.messages.append(
         human_message
     )
+
 
     with st.chat_message("user"):
 
@@ -386,11 +361,10 @@ if prompt:
             prompt
         )
 
+
     try:
 
-        with st.chat_message(
-            "assistant"
-        ):
+        with st.chat_message("assistant"):
 
             response = chatbot.invoke(
                 {
@@ -400,9 +374,10 @@ if prompt:
                 }
             )
 
-            # ------------------------------------------------
+
+            # -----------------------------------------------
             # Extract response
-            # ------------------------------------------------
+            # -----------------------------------------------
 
             if isinstance(
                 response,
@@ -416,11 +391,13 @@ if prompt:
                     )
                 )
 
+
                 if response_messages:
 
                     final_message = (
                         response_messages[-1]
                     )
+
 
                     if hasattr(
                         final_message,
@@ -449,15 +426,18 @@ if prompt:
                     response
                 )
 
+
             st.markdown(
                 answer
             )
+
 
         st.session_state.messages.append(
             AIMessage(
                 content=answer
             )
         )
+
 
     except Exception as e:
 
