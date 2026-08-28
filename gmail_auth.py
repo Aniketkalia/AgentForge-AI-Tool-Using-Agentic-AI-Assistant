@@ -14,7 +14,6 @@ import streamlit as st
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
-
 # ============================================================
 # GOOGLE OAUTH CONFIG
 # ============================================================
@@ -28,7 +27,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/gmail.send",
 ]
-
 
 # ============================================================
 # READ STREAMLIT SECRETS
@@ -76,9 +74,8 @@ def _get_redirect_uri():
         raise RuntimeError("GOOGLE_REDIRECT_URI is missing from Streamlit secrets.")
     return str(redirect_uri).strip()
 
-
 # ============================================================
-# PKCE HELPERS
+# PKCE HELPERS & GLOBAL CACHE
 # ============================================================
 
 def _generate_code_verifier():
@@ -88,12 +85,16 @@ def _generate_code_challenge(verifier):
     digest = hashlib.sha256(verifier.encode("utf-8")).digest()
     return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
 
+@st.cache_resource
+def get_oauth_store():
+    """Keeps OAuth verification data alive when Streamlit redirects tabs."""
+    return {}
 
 # ============================================================
 # CONNECT GMAIL
 # ============================================================
 
-def connect_gmail():
+def connect_gmail(user_email: str):
     client_id = _get_client_id()
     redirect_uri = _get_redirect_uri()
 
@@ -101,8 +102,12 @@ def connect_gmail():
     code_verifier = _generate_code_verifier()
     code_challenge = _generate_code_challenge(code_verifier)
 
-    st.session_state["gmail_oauth_state"] = state
-    st.session_state["gmail_code_verifier"] = code_verifier
+    # Save to global cache instead of session_state so it survives the redirect
+    store = get_oauth_store()
+    store[user_email] = {
+        "state": state,
+        "code_verifier": code_verifier
+    }
 
     params = {
         "client_id": client_id,
@@ -120,12 +125,11 @@ def connect_gmail():
     auth_url = GOOGLE_AUTH_URL + "?" + urllib.parse.urlencode(params)
     return auth_url
 
-
 # ============================================================
 # CALLBACK
 # ============================================================
 
-def handle_gmail_callback():
+def handle_gmail_callback(user_email: str):
     query_params = st.query_params
     code = query_params.get("code")
     state = query_params.get("state")
@@ -133,12 +137,15 @@ def handle_gmail_callback():
     if not code:
         raise RuntimeError("Google callback did not contain an authorization code.")
 
-    saved_state = st.session_state.get("gmail_oauth_state")
+    # Retrieve OAuth state from global cache
+    store = get_oauth_store()
+    auth_data = store.get(user_email, {})
+    saved_state = auth_data.get("state")
+    code_verifier = auth_data.get("code_verifier")
 
     if not state or not saved_state or state != saved_state:
         raise RuntimeError("Invalid or expired Gmail OAuth state. Please click Connect Gmail again.")
 
-    code_verifier = st.session_state.get("gmail_code_verifier")
     if not code_verifier:
         raise RuntimeError("Gmail OAuth code verifier is missing or expired.")
 
@@ -199,8 +206,8 @@ def handle_gmail_callback():
     st.session_state["gmail_email"] = email
     st.session_state["gmail_connected"] = True
 
-    st.session_state.pop("gmail_oauth_state", None)
-    st.session_state.pop("gmail_code_verifier", None)
+    # Clean up the cache
+    store.pop(user_email, None)
 
     return True
 
@@ -214,7 +221,6 @@ def get_connected_gmail_email():
     if not is_gmail_connected():
         return None
     return st.session_state.get("gmail_email")
-
 
 # ============================================================
 # GET GMAIL SERVICE
@@ -230,7 +236,6 @@ def get_gmail_service():
 
     refresh_token = st.session_state.get("gmail_refresh_token")
 
-    # FIXED: Added client_id, client_secret, and token_uri to handle token expiration
     credentials_kwargs = {
         "token": access_token,
         "token_uri": GOOGLE_TOKEN_URL,
@@ -249,7 +254,6 @@ def get_gmail_service():
         return service
     except Exception as e:
         raise RuntimeError(f"Unable to create Gmail service: {e}")
-
 
 def send_gmail(to_email: str, subject: str, body: str):
     if not is_gmail_connected():
@@ -288,9 +292,6 @@ def disconnect_gmail(user_id=None):
         "gmail_expires_in",
         "gmail_email",
         "gmail_connected",
-        "gmail_oauth_state",
-        "gmail_code_verifier",
-        "gmail_auth_url",
     ]
 
     for key in keys_to_remove:
