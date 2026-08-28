@@ -34,6 +34,27 @@ st.set_page_config(
 )
 
 # ============================================================
+# AGENTFORGE GOOGLE LOGIN
+# ============================================================
+# We process login first so we have the user email ready for the callback
+
+if not st.user.is_logged_in:
+    st.title("🤖 AgentForge AI")
+    st.subheader("Tool-Using Agentic AI Assistant")
+    st.write("Login with Google to continue.")
+
+    if st.button("🔐 Login with Google", use_container_width=True, type="primary"):
+        st.login()
+    st.stop()
+
+user_email = st.user.email
+user_id = st.user.get("sub")
+
+if not user_id:
+    st.error("❌ Unable to identify logged-in Google user.")
+    st.stop()
+
+# ============================================================
 # SESSION STATE
 # ============================================================
 
@@ -52,14 +73,13 @@ if "messages" not in st.session_state:
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 
-
 # ============================================================
 # GMAIL CALLBACK
 # ============================================================
 
 if "code" in st.query_params:
     try:
-        success = handle_gmail_callback()
+        success = handle_gmail_callback(user_email)
         if success:
             email = get_connected_gmail_email()
             st.session_state.gmail_email = email
@@ -76,24 +96,8 @@ if "code" in st.query_params:
 
 
 # ============================================================
-# AGENTFORGE GOOGLE LOGIN
+# LANGGRAPH THREAD
 # ============================================================
-
-if not st.user.is_logged_in:
-    st.title("🤖 AgentForge AI")
-    st.subheader("Tool-Using Agentic AI Assistant")
-    st.write("Login with Google to continue.")
-
-    if st.button("🔐 Login with Google", use_container_width=True, type="primary"):
-        st.login()
-    st.stop()
-
-user_email = st.user.email
-user_id = st.user.get("sub")
-
-if not user_id:
-    st.error("❌ Unable to identify logged-in Google user.")
-    st.stop()
 
 thread_id = f"agentforge-user-{user_id}"
 config = {"configurable": {"thread_id": thread_id}}
@@ -151,7 +155,7 @@ with st.sidebar:
 
         if st.button("🔗 Connect My Gmail", use_container_width=True, type="primary"):
             try:
-                auth_url = connect_gmail()
+                auth_url = connect_gmail(user_email)
                 if auth_url:
                     st.session_state.gmail_auth_url = auth_url
                     st.rerun()
@@ -165,7 +169,6 @@ with st.sidebar:
         if auth_url:
             safe_url = html.escape(auth_url, quote=True)
 
-            # FIXED: Changed target="_blank" to target="_self" to keep session data
             st.markdown(
                 f"""
                 <a href="{safe_url}" target="_self" style="display:block; width:100%; padding:0.75rem 1rem; background:#FF4B4B; color:white; text-align:center; text-decoration:none; border-radius:0.5rem; font-weight:600; margin-top:0.75rem; box-sizing:border-box;">
@@ -246,7 +249,6 @@ if prompt:
     try:
         with st.chat_message("assistant"):
             with st.spinner("🤖 AgentForge is thinking..."):
-                # FIXED: Passed the entire conversation history instead of just the last message
                 response = chatbot.invoke(
                     {"messages": st.session_state.messages},
                     config=config
