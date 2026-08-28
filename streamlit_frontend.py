@@ -1,5 +1,3 @@
-# streamlit_frontend.py
-
 import streamlit as st
 
 from langchain_core.messages import (
@@ -13,7 +11,6 @@ from gmail_auth import (
     get_gmail_service,
     is_gmail_connected,
     get_connected_gmail_email,
-    disconnect_gmail,
 )
 
 
@@ -29,28 +26,22 @@ st.set_page_config(
 
 
 # ============================================================
-# GOOGLE OAUTH CALLBACK
+# HANDLE GMAIL CALLBACK FIRST
 # ============================================================
 
 if "code" in st.query_params:
 
-    try:
+    success = handle_gmail_callback()
 
-        success = handle_gmail_callback()
+    if success:
 
-        if success:
+        # Force a clean rerun after saving token
+        st.rerun()
 
-            st.session_state[
-                "gmail_connected"
-            ] = True
+    else:
 
-            st.rerun()
-
-    except Exception as e:
-
-        st.error(
-            f"Gmail connection failed: {e}"
-        )
+        # If callback failed, stop here
+        st.stop()
 
 
 # ============================================================
@@ -89,29 +80,45 @@ user_id = st.user.get("sub")
 
 
 # ============================================================
-# GMAIL STATUS
+# LOAD GMAIL FROM SQLITE
 # ============================================================
 
 try:
+
+    gmail_connected = is_gmail_connected()
 
     gmail_email = (
         get_connected_gmail_email()
     )
 
-    gmail_connected = (
-        gmail_email is not None
-        and is_gmail_connected()
-    )
-
 except Exception as e:
-
-    gmail_email = None
 
     gmail_connected = False
 
-    st.warning(
-        f"Gmail storage check failed: {e}"
+    gmail_email = None
+
+    st.sidebar.error(
+        "Unable to load Gmail connection."
     )
+
+    with st.sidebar.expander(
+        "Database error"
+    ):
+
+        st.code(str(e))
+
+
+# ============================================================
+# SYNCHRONIZE SESSION CACHE
+# ============================================================
+
+st.session_state["gmail_connected"] = (
+    gmail_connected
+)
+
+st.session_state["gmail_email"] = (
+    gmail_email
+)
 
 
 # ============================================================
@@ -128,7 +135,7 @@ st.sidebar.success(
 
 
 # ============================================================
-# GMAIL
+# GMAIL SECTION
 # ============================================================
 
 st.sidebar.markdown("---")
@@ -144,34 +151,49 @@ if gmail_connected:
         "✅ Gmail Connected"
     )
 
-    st.sidebar.caption(
-        gmail_email
-    )
+    if gmail_email:
+
+        st.sidebar.caption(
+            gmail_email
+        )
+
+    # --------------------------------------------------------
+    # DISCONNECT
+    # --------------------------------------------------------
 
     if st.sidebar.button(
         "🔌 Disconnect Gmail",
         use_container_width=True,
     ):
 
+        from gmail_auth import disconnect_gmail
+
         disconnect_gmail(
             user_id
         )
 
-        st.session_state[
-            "gmail_connected"
-        ] = False
+        st.session_state.pop(
+            "gmail_connected",
+            None
+        )
 
-        st.session_state[
-            "gmail_email"
-        ] = None
+        st.session_state.pop(
+            "gmail_email",
+            None
+        )
 
         st.rerun()
+
 
 else:
 
     st.sidebar.info(
         "Gmail is not connected."
     )
+
+    # --------------------------------------------------------
+    # CONNECT
+    # --------------------------------------------------------
 
     if st.sidebar.button(
         "🔗 Connect My Gmail",
@@ -184,26 +206,20 @@ else:
 
             if auth_url:
 
-                # IMPORTANT:
-                # Use Streamlit's browser navigation.
+                # ------------------------------------------------
+                # Use browser navigation.
                 #
-                # Do not create a meta-refresh page.
-                # Do not open a popup.
-                #
-                # This prevents the blank Chrome page problem.
+                # This avoids iframe/new-tab problems.
+                # ------------------------------------------------
 
                 st.markdown(
                     f"""
-                    <meta
-                        http-equiv="refresh"
-                        content="0; url={auth_url}"
-                    >
+                    <script>
+                        window.top.location.href =
+                        {auth_url!r};
+                    </script>
                     """,
                     unsafe_allow_html=True,
-                )
-
-                st.info(
-                    "Redirecting to Google Gmail authorization..."
                 )
 
                 st.stop()
@@ -211,7 +227,7 @@ else:
             else:
 
                 st.error(
-                    "Unable to create Gmail authorization URL."
+                    "Unable to start Gmail authorization."
                 )
 
         except Exception as e:
@@ -232,15 +248,7 @@ if st.sidebar.button(
     use_container_width=True,
 ):
 
-    st.session_state.pop(
-        "gmail_connected",
-        None,
-    )
-
-    st.session_state.pop(
-        "gmail_email",
-        None,
-    )
+    st.session_state.clear()
 
     st.logout()
 
@@ -278,17 +286,10 @@ with st.sidebar.expander(
 # BACKEND
 # ============================================================
 
-try:
-
-    from backend import chatbot
-
-except Exception as e:
-
-    st.error(
-        f"Backend import error: {e}"
-    )
-
-    st.stop()
+from backend import (
+    chatbot,
+    retrieve,
+)
 
 
 # ============================================================
@@ -349,9 +350,7 @@ for message in st.session_state.messages:
         AIMessage,
     ):
 
-        with st.chat_message(
-            "assistant"
-        ):
+        with st.chat_message("assistant"):
 
             st.markdown(
                 message.content
@@ -366,6 +365,10 @@ prompt = st.chat_input(
     "Ask me anything..."
 )
 
+
+# ============================================================
+# PROCESS MESSAGE
+# ============================================================
 
 if prompt:
 
@@ -383,39 +386,23 @@ if prompt:
             prompt
         )
 
-    # ========================================================
-    # RUN AGENT
-    # ========================================================
-
     try:
 
         with st.chat_message(
             "assistant"
         ):
 
-            # IMPORTANT:
-            # Your LangGraph chatbot has a checkpointer.
-            #
-            # Therefore we MUST provide thread_id.
-
             response = chatbot.invoke(
-
                 {
                     "messages": [
                         human_message
                     ]
-                },
-
-                config={
-                    "configurable": {
-                        "thread_id": user_id
-                    }
-                },
+                }
             )
 
-            # =================================================
-            # EXTRACT RESPONSE
-            # =================================================
+            # ------------------------------------------------
+            # Extract response
+            # ------------------------------------------------
 
             if isinstance(
                 response,
