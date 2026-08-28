@@ -11,7 +11,7 @@ from typing import TypedDict, Annotated
 
 import streamlit as st
 from dotenv import load_dotenv
-
+from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import (
     BaseMessage,
     SystemMessage,
