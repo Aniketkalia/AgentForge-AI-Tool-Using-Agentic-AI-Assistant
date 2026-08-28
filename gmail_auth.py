@@ -226,15 +226,23 @@ def get_connected_gmail_email():
 # GET GMAIL SERVICE
 # ============================================================
 
-def get_gmail_service():
+# ============================================================
+# GET GMAIL SERVICE
+# ============================================================
+
+def get_gmail_service(access_token=None, refresh_token=None):
     """
     Return authenticated Gmail API service with refresh token setup.
     """
-    access_token = st.session_state.get("gmail_access_token")
+    # Use provided tokens if available, otherwise fallback to Streamlit memory
+    if access_token is None:
+        access_token = st.session_state.get("gmail_access_token")
+        
     if not access_token:
         raise RuntimeError("Gmail is not connected.")
 
-    refresh_token = st.session_state.get("gmail_refresh_token")
+    if refresh_token is None:
+        refresh_token = st.session_state.get("gmail_refresh_token")
 
     credentials_kwargs = {
         "token": access_token,
@@ -272,7 +280,6 @@ def send_gmail(to_email: str, subject: str, body: str):
         return result
     except Exception as e:
         raise RuntimeError(f"Gmail send failed: {e}")
-
 
 def disconnect_gmail(user_id=None):
     access_token = st.session_state.get("gmail_access_token")
