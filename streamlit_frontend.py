@@ -19,6 +19,7 @@ from gmail_auth import (
     get_connected_gmail_email,
     is_gmail_connected,
     disconnect_gmail,
+    get_gmail_service,
 )
 
 from backend import chatbot
