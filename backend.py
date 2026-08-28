@@ -1,15 +1,15 @@
-# backend.py
+# ============================================================
+# AgentForge AI - backend.py
+# ============================================================
 
 import os
 import base64
 import requests
 
 from email.message import EmailMessage
-
 from typing import TypedDict, Annotated
 
 import streamlit as st
-
 from dotenv import load_dotenv
 
 from langchain_core.messages import (
@@ -18,12 +18,9 @@ from langchain_core.messages import (
 )
 
 from langchain_core.tools import tool
-
 from langchain_groq import ChatGroq
 
-from langchain_community.tools import (
-    DuckDuckGoSearchRun
-)
+from langchain_community.tools import DuckDuckGoSearchRun
 
 from langgraph.graph import (
     StateGraph,
@@ -37,13 +34,6 @@ from langgraph.prebuilt import (
     tools_condition,
 )
 
-from langgraph.checkpoint.sqlite import (
-    SqliteSaver
-)
-
-import sqlite3
-
-
 # ============================================================
 # LOAD ENVIRONMENT
 # ============================================================
@@ -55,31 +45,42 @@ load_dotenv()
 # STREAMLIT SECRETS
 # ============================================================
 
-if "GROQ_API_KEY" in st.secrets:
+try:
+    if "GROQ_API_KEY" in st.secrets:
+        os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+except Exception:
+    pass
 
-    os.environ["GROQ_API_KEY"] = (
-        st.secrets["GROQ_API_KEY"]
+
+# ============================================================
+# ALPHA VANTAGE
+# ============================================================
+
+try:
+    ALPHA_VANTAGE_API_KEY = st.secrets.get(
+        "ALPHA_VANTAGE_API_KEY",
+        os.getenv("ALPHA_VANTAGE_API_KEY"),
+    )
+except Exception:
+    ALPHA_VANTAGE_API_KEY = os.getenv(
+        "ALPHA_VANTAGE_API_KEY"
     )
 
 
-ALPHA_VANTAGE_API_KEY = st.secrets.get(
-    "ALPHA_VANTAGE_API_KEY",
-    os.getenv("ALPHA_VANTAGE_API_KEY")
-)
-
-
 # ============================================================
-# GMAIL SERVICE
+# GMAIL
 #
 # IMPORTANT:
-# Use gmail_auth.py.
-#
-# DO NOT create another Gmail authentication system here.
+# Gmail authentication is handled ONLY by gmail_auth.py
 # ============================================================
 
-from gmail_auth import (
-    get_gmail_service,
-)
+try:
+    from gmail_auth import get_gmail_service
+except ImportError as e:
+    raise ImportError(
+        "Could not import get_gmail_service from gmail_auth.py. "
+        "Make sure gmail_auth.py is in the same project directory."
+    ) from e
 
 
 # ============================================================
@@ -87,9 +88,7 @@ from gmail_auth import (
 # ============================================================
 
 model = ChatGroq(
-
     model="openai/gpt-oss-120b",
-
     temperature=0.3,
 )
 
@@ -105,20 +104,17 @@ def send_email(
     body: str,
 ) -> str:
     """
-    Send an email using the currently
-    connected Gmail account.
+    Send an email using the user's connected Gmail account.
     """
 
     try:
-
         # ----------------------------------------------------
-        # GET CURRENT USER'S GMAIL SERVICE
+        # GET GMAIL SERVICE FROM gmail_auth.py
         # ----------------------------------------------------
 
         service = get_gmail_service()
 
         if service is None:
-
             return (
                 "EMAIL_FAILED: Gmail is not connected. "
                 "Please connect Gmail first."
@@ -131,20 +127,19 @@ def send_email(
         message = EmailMessage()
 
         message["To"] = to
-
         message["Subject"] = subject
 
         message.set_content(body)
 
         # ----------------------------------------------------
-        # ENCODE
+        # ENCODE EMAIL
         # ----------------------------------------------------
 
         encoded_message = (
             base64.urlsafe_b64encode(
                 message.as_bytes()
             )
-            .decode()
+            .decode("utf-8")
         )
 
         request_body = {
@@ -152,7 +147,7 @@ def send_email(
         }
 
         # ----------------------------------------------------
-        # SEND
+        # SEND THROUGH GMAIL API
         # ----------------------------------------------------
 
         response = (
@@ -167,19 +162,25 @@ def send_email(
 
         message_id = response.get(
             "id",
-            "unknown"
+            "unknown",
         )
 
-        sender = (
-            st.user.email
-            if st.user.is_logged_in
-            else "Gmail account"
-        )
+        # ----------------------------------------------------
+        # GET CONNECTED USER
+        # ----------------------------------------------------
+
+        try:
+            if st.user.is_logged_in:
+                sender = st.user.email
+            else:
+                sender = "connected Gmail account"
+        except Exception:
+            sender = "connected Gmail account"
 
         return (
             "EMAIL_SENT: "
-            f"Email successfully sent from "
-            f"{sender} to {to}. "
+            f"Email successfully sent from {sender} "
+            f"to {to}. "
             f"Message ID: {message_id}"
         )
 
@@ -213,7 +214,7 @@ def calculator(
     """
     Perform basic arithmetic.
 
-    Supported:
+    Supported operations:
     add
     sub
     mul
@@ -231,24 +232,21 @@ def calculator(
         if operation == "add":
 
             result = (
-                first_num
-                +
+                first_num +
                 second_num
             )
 
         elif operation == "sub":
 
             result = (
-                first_num
-                -
+                first_num -
                 second_num
             )
 
         elif operation == "mul":
 
             result = (
-                first_num
-                *
+                first_num *
                 second_num
             )
 
@@ -262,8 +260,7 @@ def calculator(
                 }
 
             result = (
-                first_num
-                /
+                first_num /
                 second_num
             )
 
@@ -275,18 +272,10 @@ def calculator(
             }
 
         return {
-
-            "first_num":
-                first_num,
-
-            "second_num":
-                second_num,
-
-            "operation":
-                operation,
-
-            "result":
-                result,
+            "first_num": first_num,
+            "second_num": second_num,
+            "operation": operation,
+            "result": result,
         }
 
     except Exception as e:
@@ -305,7 +294,7 @@ def get_stock_price(
     symbol: str,
 ) -> dict:
     """
-    Get latest stock price.
+    Get the latest stock price using Alpha Vantage.
     """
 
     try:
@@ -337,7 +326,9 @@ def get_stock_price(
 
         response.raise_for_status()
 
-        return response.json()
+        data = response.json()
+
+        return data
 
     except Exception as e:
 
@@ -351,13 +342,9 @@ def get_stock_price(
 # ============================================================
 
 tools = [
-
     get_stock_price,
-
     search_tool,
-
     calculator,
-
     send_email,
 ]
 
@@ -388,19 +375,19 @@ class ChatState(TypedDict):
 # ============================================================
 
 def chat_node(
-    state: ChatState
+    state: ChatState,
 ):
 
     system_instruction = """
 You are AgentForge AI, a tool-using AI assistant.
 
-Available tools:
+You can use the following tools:
 
 1. send_email
    Sends an email through the user's connected Gmail.
 
 2. calculator
-   Performs arithmetic.
+   Performs arithmetic calculations.
 
 3. get_stock_price
    Gets current stock prices.
@@ -408,18 +395,24 @@ Available tools:
 4. duckduckgo_search
    Searches the web.
 
-IMPORTANT EMAIL RULES:
+============================================================
+EMAIL RULES
+============================================================
 
 1. If the user explicitly asks you to send an email,
    ALWAYS call send_email.
 
-2. NEVER say an email was sent unless
+2. NEVER claim that an email was sent unless
    send_email returns EMAIL_SENT.
 
-3. If the user gives a recipient, subject,
-   and body, call send_email.
+3. If the user gives:
+   - recipient
+   - subject
+   - body
 
-4. If the recipient is missing,
+   call send_email.
+
+4. If recipient is missing,
    ask for the recipient.
 
 5. If subject is missing,
@@ -428,41 +421,55 @@ IMPORTANT EMAIL RULES:
 6. If body is missing,
    ask for the body.
 
-7. If the send_email tool returns EMAIL_FAILED,
+7. If send_email returns EMAIL_FAILED,
    clearly tell the user that sending failed.
 
-8. Never fabricate successful email delivery.
+8. NEVER fabricate successful email delivery.
 
-CALCULATOR:
+9. If the user confirms a recipient and then provides
+   subject/body, use the confirmed recipient.
+
+10. Do not ask again for information that the user
+    already provided in the conversation.
+
+============================================================
+CALCULATOR
+============================================================
 
 Use calculator for arithmetic when appropriate.
 
-STOCK:
+============================================================
+STOCK
+============================================================
 
 Use get_stock_price for current stock prices.
 
-WEB:
+============================================================
+WEB SEARCH
+============================================================
 
-Use web search for current information.
+Use DuckDuckGo search for current information.
+
+============================================================
+GENERAL
+============================================================
 
 Always explain tool results clearly.
+
+Be concise and helpful.
 """
 
     messages = state["messages"]
 
     messages_with_system = [
-
         SystemMessage(
             content=system_instruction
         ),
-
         *messages,
     ]
 
-    response = (
-        llm_with_tools.invoke(
-            messages_with_system
-        )
+    response = llm_with_tools.invoke(
+        messages_with_system
     )
 
     return {
@@ -488,11 +495,14 @@ graph = StateGraph(
 )
 
 
+# ============================================================
+# ADD NODES
+# ============================================================
+
 graph.add_node(
     "chat_node",
     chat_node
 )
-
 
 graph.add_node(
     "tools",
@@ -500,17 +510,19 @@ graph.add_node(
 )
 
 
+# ============================================================
+# EDGES
+# ============================================================
+
 graph.add_edge(
     START,
     "chat_node"
 )
 
-
 graph.add_conditional_edges(
     "chat_node",
     tools_condition
 )
-
 
 graph.add_edge(
     "tools",
@@ -519,66 +531,69 @@ graph.add_edge(
 
 
 # ============================================================
-# SQLITE CHECKPOINTER
+# COMPILE GRAPH
+#
+# IMPORTANT:
+# NO SQLITE CHECKPOINTER HERE.
+#
+# This prevents:
+# "Checkpointer requires one or more of the following
+# configurable keys: thread_id..."
 # ============================================================
 
-conn = sqlite3.connect(
-
-    "chatbot.db",
-
-    check_same_thread=False,
-)
-
-
-checkpointer = SqliteSaver(
-    conn=conn
-)
+chatbot = graph.compile()
 
 
 # ============================================================
-# COMPILE
-# ============================================================
-
-chatbot = graph.compile(
-    checkpointer=checkpointer
-)
-
-
-# ============================================================
-# RETRIEVE THREADS
+# RETRIEVE
+#
+# Kept for frontend compatibility if your frontend imports
+# retrieve().
 # ============================================================
 
 def retrieve():
 
-    all_threads = set()
+    """
+    Compatibility function.
 
-    try:
+    The current backend does not use a persistent
+    LangGraph SQLite checkpointer.
+    """
 
-        for checkpoint in checkpointer.list(None):
+    return []
 
-            config = checkpoint.config
 
-            configurable = config.get(
-                "configurable",
-                {}
-            )
+# ============================================================
+# HELPER FUNCTION
+# ============================================================
 
-            thread_id = configurable.get(
-                "thread_id"
-            )
+def invoke_agent(
+    messages,
+):
+    """
+    Simple helper for Streamlit frontend.
 
-            if thread_id:
+    No thread_id/config is required because the graph
+    does not use a checkpointer.
+    """
 
-                all_threads.add(
-                    thread_id
-                )
-
-    except Exception as e:
-
-        print(
-            f"Thread retrieval error: {e}"
-        )
-
-    return list(
-        all_threads
+    return chatbot.invoke(
+        {
+            "messages": messages
+        }
     )
+
+
+# ============================================================
+# EXPORTS
+# ============================================================
+
+__all__ = [
+    "chatbot",
+    "invoke_agent",
+    "send_email",
+    "calculator",
+    "get_stock_price",
+    "search_tool",
+    "retrieve",
+]
