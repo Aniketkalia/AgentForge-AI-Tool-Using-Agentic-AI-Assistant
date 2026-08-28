@@ -73,12 +73,10 @@ except Exception as e:
 try:
 
     from gmail_auth import (
-        connect_gmail,
-        handle_gmail_callback,
-        get_connected_gmail_email,
-        disconnect_gmail,
-    )
-
+    connect_gmail,
+    handle_gmail_callback,
+    get_connected_gmail_email,
+)
 except Exception as e:
 
     st.error(
