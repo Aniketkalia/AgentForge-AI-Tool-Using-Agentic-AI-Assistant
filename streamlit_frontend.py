@@ -171,7 +171,7 @@ with st.sidebar:
 
             st.markdown(
                 f"""
-                <a href="{safe_url}" target="_self" style="display:block; width:100%; padding:0.75rem 1rem; background:#FF4B4B; color:white; text-align:center; text-decoration:none; border-radius:0.5rem; font-weight:600; margin-top:0.75rem; box-sizing:border-box;">
+                <a href="{safe_url}" target="_blank" style="display:block; width:100%; padding:0.75rem 1rem; background:#FF4B4B; color:white; text-align:center; text-decoration:none; border-radius:0.5rem; font-weight:600; margin-top:0.75rem; box-sizing:border-box;">
                     🔐 Continue with Google
                 </a>
                 """,
