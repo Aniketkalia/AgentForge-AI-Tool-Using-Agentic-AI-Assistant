@@ -8,7 +8,7 @@ import requests
 
 from email.message import EmailMessage
 from typing import TypedDict, Annotated
-
+{state["messages"][0].content}
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_core.runnables import RunnableConfig
@@ -585,7 +585,12 @@ BLOCK.
 ORIGINAL USER REQUEST
 ============================================================
 
-{state["messages"][0].content}
+user_request = ""
+
+for message in reversed(state["messages"]):
+    if isinstance(message, HumanMessage):
+        user_request = message.content
+        break
 
 ============================================================
 PROPOSED TOOL CALL
