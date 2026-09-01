@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import (
     BaseMessage,
-    SystemMessage,
+    SystemMessage,HumanMessage
+)
 )
 
 from langchain_core.tools import tool
